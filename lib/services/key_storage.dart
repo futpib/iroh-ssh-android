@@ -42,7 +42,9 @@ class KeyStorage {
     final pem = keyPair.toPem();
 
     final dir = await _keyDir;
-    await File('${dir.path}/$name').writeAsString(pem);
+    final file = File('${dir.path}/$name');
+    await file.writeAsString(pem);
+    await _chmodPrivateKey(file.path);
 
     return StoredKey(
       name: name,
@@ -58,7 +60,9 @@ class KeyStorage {
     }
 
     final dir = await _keyDir;
-    await File('${dir.path}/$name').writeAsString(pemContent);
+    final file = File('${dir.path}/$name');
+    await file.writeAsString(pemContent);
+    await _chmodPrivateKey(file.path);
 
     final keyPair = keyPairs.first;
     final publicKeyString = _publicKeyFromPair(keyPair, name);
@@ -102,6 +106,12 @@ class KeyStorage {
     final file = File('${dir.path}/$name');
     if (await file.exists()) {
       await file.delete();
+    }
+  }
+
+  Future<void> _chmodPrivateKey(String path) async {
+    if (Platform.isLinux || Platform.isMacOS) {
+      await Process.run('chmod', ['600', path]);
     }
   }
 
