@@ -50,4 +50,3 @@ jobs:
           name: ${{ github.sha }}
           body: Automatically built APK from ${{ github.sha }}.
           files: build/app/outputs/flutter-apk/app-release.apk
-          make_latest: true
