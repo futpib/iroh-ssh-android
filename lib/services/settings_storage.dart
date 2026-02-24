@@ -4,23 +4,41 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 class AppSettings {
-  final List<String> relayUrls;
-  final List<String> extraRelayUrls;
+  final bool useDefaultRelays;
+  final List<String> customRelayUrls;
 
   AppSettings({
-    this.relayUrls = const [],
-    this.extraRelayUrls = const [],
+    this.useDefaultRelays = true,
+    this.customRelayUrls = const [],
   });
 
   Map<String, dynamic> toJson() => {
-        'relayUrls': relayUrls,
-        'extraRelayUrls': extraRelayUrls,
+        'useDefaultRelays': useDefaultRelays,
+        'customRelayUrls': customRelayUrls,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
+    // Backwards compat: migrate old relayUrls/extraRelayUrls
+    if (json.containsKey('useDefaultRelays')) {
+      return AppSettings(
+        useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
+        customRelayUrls:
+            (json['customRelayUrls'] as List?)?.cast<String>() ?? [],
+      );
+    }
+    final oldRelayUrls =
+        (json['relayUrls'] as List?)?.cast<String>() ?? [];
+    final oldExtraRelayUrls =
+        (json['extraRelayUrls'] as List?)?.cast<String>() ?? [];
+    if (oldRelayUrls.isNotEmpty) {
+      return AppSettings(
+        useDefaultRelays: false,
+        customRelayUrls: oldRelayUrls,
+      );
+    }
     return AppSettings(
-      relayUrls: (json['relayUrls'] as List?)?.cast<String>() ?? [],
-      extraRelayUrls: (json['extraRelayUrls'] as List?)?.cast<String>() ?? [],
+      useDefaultRelays: true,
+      customRelayUrls: oldExtraRelayUrls,
     );
   }
 }

@@ -5,13 +5,13 @@ import 'package:path_provider/path_provider.dart';
 
 class SavedConnection {
   final String target;
-  final List<String> relayUrls;
-  final List<String> extraRelayUrls;
+  final bool useDefaultRelays;
+  final List<String> customRelayUrls;
 
   SavedConnection({
     required this.target,
-    this.relayUrls = const [],
-    this.extraRelayUrls = const [],
+    this.useDefaultRelays = true,
+    this.customRelayUrls = const [],
   });
 
   String get username => target.split('@').first;
@@ -19,15 +19,35 @@ class SavedConnection {
 
   Map<String, dynamic> toJson() => {
         'target': target,
-        'relayUrls': relayUrls,
-        'extraRelayUrls': extraRelayUrls,
+        'useDefaultRelays': useDefaultRelays,
+        'customRelayUrls': customRelayUrls,
       };
 
   factory SavedConnection.fromJson(Map<String, dynamic> json) {
+    if (json.containsKey('useDefaultRelays')) {
+      return SavedConnection(
+        target: json['target'] as String,
+        useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
+        customRelayUrls:
+            (json['customRelayUrls'] as List?)?.cast<String>() ?? [],
+      );
+    }
+    // Backwards compat: migrate old relayUrls/extraRelayUrls
+    final oldRelayUrls =
+        (json['relayUrls'] as List?)?.cast<String>() ?? [];
+    final oldExtraRelayUrls =
+        (json['extraRelayUrls'] as List?)?.cast<String>() ?? [];
+    if (oldRelayUrls.isNotEmpty) {
+      return SavedConnection(
+        target: json['target'] as String,
+        useDefaultRelays: false,
+        customRelayUrls: oldRelayUrls,
+      );
+    }
     return SavedConnection(
       target: json['target'] as String,
-      relayUrls: (json['relayUrls'] as List?)?.cast<String>() ?? [],
-      extraRelayUrls: (json['extraRelayUrls'] as List?)?.cast<String>() ?? [],
+      useDefaultRelays: true,
+      customRelayUrls: oldExtraRelayUrls,
     );
   }
 }

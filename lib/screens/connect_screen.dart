@@ -3,9 +3,9 @@ import 'package:iroh_ssh_app/services/connection_storage.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
-import 'package:iroh_ssh_app/screens/keys_screen.dart';
 import 'package:iroh_ssh_app/screens/settings_screen.dart';
 import 'package:iroh_ssh_app/screens/terminal_screen.dart';
+import 'package:iroh_ssh_app/widgets/relay_url_list_editor.dart';
 
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
@@ -16,8 +16,8 @@ class ConnectScreen extends StatefulWidget {
 
 class _ConnectScreenState extends State<ConnectScreen> {
   final _targetController = TextEditingController();
-  final _relayUrlsController = TextEditingController();
-  final _extraRelayUrlsController = TextEditingController();
+  bool _useDefaultRelays = true;
+  List<String> _customRelayUrls = [];
   bool _connecting = false;
   String? _error;
   List<SavedConnection> _savedConnections = [];
@@ -38,22 +38,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
   @override
   void dispose() {
     _targetController.dispose();
-    _relayUrlsController.dispose();
-    _extraRelayUrlsController.dispose();
     super.dispose();
   }
 
-  List<String> _parseLines(String text) {
-    return text
-        .split('\n')
-        .map((l) => l.trim())
-        .where((l) => l.isNotEmpty)
-        .toList();
-  }
-
   Future<void> _connectTo(String target,
-      {List<String> relayUrls = const [],
-      List<String> extraRelayUrls = const []}) async {
+      {bool useDefaultRelays = true,
+      List<String> customRelayUrls = const []}) async {
     final String username;
     final String endpointId;
 
@@ -75,22 +65,31 @@ class _ConnectScreenState extends State<ConnectScreen> {
       final keys = await KeyStorage.instance.listKeys();
       final globalSettings = await SettingsStorage.instance.load();
 
-      final effectiveRelayUrls =
-          relayUrls.isNotEmpty ? relayUrls : globalSettings.relayUrls;
-      final effectiveExtraRelayUrls = extraRelayUrls.isNotEmpty
-          ? extraRelayUrls
-          : globalSettings.extraRelayUrls;
+      final effectiveUseDefaultRelays =
+          customRelayUrls.isNotEmpty ? useDefaultRelays : globalSettings.useDefaultRelays;
+      final effectiveCustomRelayUrls =
+          customRelayUrls.isNotEmpty ? customRelayUrls : globalSettings.customRelayUrls;
+
+      final List<String> relayUrls;
+      final List<String> extraRelayUrls;
+      if (effectiveUseDefaultRelays) {
+        relayUrls = [];
+        extraRelayUrls = effectiveCustomRelayUrls;
+      } else {
+        relayUrls = effectiveCustomRelayUrls;
+        extraRelayUrls = [];
+      }
 
       final port = await connectIroh(
         endpointId: endpointId,
-        relayUrls: effectiveRelayUrls,
-        extraRelayUrls: effectiveExtraRelayUrls,
+        relayUrls: relayUrls,
+        extraRelayUrls: extraRelayUrls,
       );
 
       await ConnectionStorage.instance.save(SavedConnection(
         target: target,
-        relayUrls: relayUrls,
-        extraRelayUrls: extraRelayUrls,
+        useDefaultRelays: useDefaultRelays,
+        customRelayUrls: customRelayUrls,
       ));
       await _loadConnections();
 
@@ -122,10 +121,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
       setState(() => _error = 'Paste a target like user@endpoint_id');
       return;
     }
-    final relayUrls = _parseLines(_relayUrlsController.text);
-    final extraRelayUrls = _parseLines(_extraRelayUrlsController.text);
     await _connectTo(raw,
-        relayUrls: relayUrls, extraRelayUrls: extraRelayUrls);
+        useDefaultRelays: _useDefaultRelays,
+        customRelayUrls: _customRelayUrls);
   }
 
   Future<void> _deleteConnection(SavedConnection connection) async {
@@ -154,11 +152,14 @@ class _ConnectScreenState extends State<ConnectScreen> {
   }
 
   void _onSavedConnectionTap(SavedConnection conn) {
-    _targetController.text = conn.target;
-    _relayUrlsController.text = conn.relayUrls.join('\n');
-    _extraRelayUrlsController.text = conn.extraRelayUrls.join('\n');
+    setState(() {
+      _targetController.text = conn.target;
+      _useDefaultRelays = conn.useDefaultRelays;
+      _customRelayUrls = List.of(conn.customRelayUrls);
+    });
     _connectTo(conn.target,
-        relayUrls: conn.relayUrls, extraRelayUrls: conn.extraRelayUrls);
+        useDefaultRelays: conn.useDefaultRelays,
+        customRelayUrls: conn.customRelayUrls);
   }
 
   @override
@@ -175,15 +176,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
               );
             },
             tooltip: 'Settings',
-          ),
-          IconButton(
-            icon: const Icon(Icons.vpn_key),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const KeysScreen()),
-              );
-            },
-            tooltip: 'Manage Keys',
           ),
         ],
       ),
@@ -212,34 +204,22 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: const EdgeInsets.only(bottom: 8),
                   children: [
-                    TextField(
-                      controller: _relayUrlsController,
-                      decoration: const InputDecoration(
-                        labelText: 'Relay URLs',
-                        helperText: 'Replaces defaults. One URL per line.',
-                        helperMaxLines: 2,
-                        border: OutlineInputBorder(),
-                      ),
-                      maxLines: 3,
-                      style:
-                          const TextStyle(fontFamily: 'monospace', fontSize: 13),
-                      autocorrect: false,
-                      enableSuggestions: false,
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Use default relays'),
+                      value: _useDefaultRelays,
+                      onChanged: (value) =>
+                          setState(() => _useDefaultRelays = value),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _extraRelayUrlsController,
-                      decoration: const InputDecoration(
-                        labelText: 'Extra Relay URLs',
-                        helperText: 'Added alongside defaults. One URL per line.',
-                        helperMaxLines: 2,
-                        border: OutlineInputBorder(),
-                      ),
-                      maxLines: 3,
-                      style:
-                          const TextStyle(fontFamily: 'monospace', fontSize: 13),
-                      autocorrect: false,
-                      enableSuggestions: false,
+                    const SizedBox(height: 8),
+                    RelayUrlListEditor(
+                      label: 'Custom relays',
+                      helperText: _useDefaultRelays
+                          ? 'Added alongside defaults for this connection.'
+                          : 'Replaces defaults for this connection.',
+                      urls: _customRelayUrls,
+                      onChanged: (urls) =>
+                          setState(() => _customRelayUrls = urls),
                     ),
                   ],
                 ),
