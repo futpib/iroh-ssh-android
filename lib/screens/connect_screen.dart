@@ -4,11 +4,14 @@ import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/screens/settings_screen.dart';
-import 'package:iroh_ssh_app/screens/terminal_screen.dart';
+import 'package:iroh_ssh_app/models/ssh_session_info.dart';
+import 'package:iroh_ssh_app/screens/sessions_screen.dart';
 import 'package:iroh_ssh_app/widgets/relay_url_list_editor.dart';
 
 class ConnectScreen extends StatefulWidget {
-  const ConnectScreen({super.key});
+  final bool returnResult;
+
+  const ConnectScreen({super.key, this.returnResult = false});
 
   @override
   State<ConnectScreen> createState() => _ConnectScreenState();
@@ -95,16 +98,23 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
       if (!mounted) return;
 
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => TerminalScreen(
-            host: 'localhost',
-            port: port,
-            username: username,
-            identities: keys.map((k) => k.keyPair).toList(),
-          ),
-        ),
+      final sessionInfo = SshSessionInfo(
+        host: 'localhost',
+        port: port,
+        username: username,
+        identities: keys.map((k) => k.keyPair).toList(),
+        displayName: target,
       );
+
+      if (widget.returnResult) {
+        Navigator.of(context).pop(sessionInfo);
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SessionsScreen(initialSession: sessionInfo),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());

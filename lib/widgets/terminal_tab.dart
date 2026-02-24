@@ -3,28 +3,26 @@ import 'dart:convert';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
+import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:xterm/xterm.dart';
 
-class TerminalScreen extends StatefulWidget {
-  final String host;
-  final int port;
-  final String username;
-  final List<SSHKeyPair> identities;
+class TerminalTab extends StatefulWidget {
+  final SshSessionInfo session;
+  final VoidCallback onDisconnected;
 
-  const TerminalScreen({
+  const TerminalTab({
     super.key,
-    required this.host,
-    required this.port,
-    required this.username,
-    this.identities = const [],
+    required this.session,
+    required this.onDisconnected,
   });
 
   @override
-  State<TerminalScreen> createState() => _TerminalScreenState();
+  State<TerminalTab> createState() => TerminalTabState();
 }
 
-class _TerminalScreenState extends State<TerminalScreen> {
+class TerminalTabState extends State<TerminalTab>
+    with AutomaticKeepAliveClientMixin {
   final _terminal = Terminal(maxLines: 10000);
   SSHClient? _client;
   SSHSession? _session;
@@ -35,10 +33,17 @@ class _TerminalScreenState extends State<TerminalScreen> {
   StringBuffer _inputBuffer = StringBuffer();
   bool _inputEcho = true;
 
+  bool get connected => _connected;
+
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   void initState() {
     super.initState();
-    _connectSsh();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _connectSsh();
+    });
   }
 
   Future<String> _readLineFromTerminal({bool echo = true}) {
@@ -80,14 +85,16 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _terminal.onOutput = _handleTerminalInput;
 
     try {
-      _terminal.write('Connecting to ${widget.host}:${widget.port}...\r\n');
+      _terminal.write(
+          'Connecting to ${widget.session.host}:${widget.session.port}...\r\n');
 
-      final socket = await SSHSocket.connect(widget.host, widget.port);
+      final socket = await SSHSocket.connect(
+          widget.session.host, widget.session.port);
 
       _client = SSHClient(
         socket,
-        username: widget.username,
-        identities: widget.identities,
+        username: widget.session.username,
+        identities: widget.session.identities,
         onPasswordRequest: () async {
           _terminal.write('Password: ');
           return await _readLineFromTerminal(echo: false);
@@ -149,7 +156,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     }
   }
 
-  Future<void> _retry() async {
+  Future<void> retry() async {
     setState(() => _authFailed = false);
     _client?.close();
     _client = null;
@@ -158,12 +165,16 @@ class _TerminalScreenState extends State<TerminalScreen> {
     await _connectSsh();
   }
 
+  Future<void> disconnect() async {
+    await _disconnect();
+  }
+
   Future<void> _disconnect() async {
     _session?.close();
     _client?.close();
-    await disconnectIroh(port: widget.port);
+    await disconnectIroh(port: widget.session.port);
     if (mounted) {
-      Navigator.of(context).pop();
+      widget.onDisconnected();
     }
   }
 
@@ -171,34 +182,30 @@ class _TerminalScreenState extends State<TerminalScreen> {
   void dispose() {
     _session?.close();
     _client?.close();
-    disconnectIroh(port: widget.port);
+    disconnectIroh(port: widget.session.port);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_connected
-            ? 'Connected'
-            : _authFailed
-                ? 'Authentication failed'
-                : 'Connecting...'),
-        actions: [
-          if (_authFailed)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: _retry,
-              tooltip: 'Retry',
+    super.build(context);
+    return Stack(
+      children: [
+        TerminalView(_terminal),
+        if (_authFailed)
+          Positioned(
+            bottom: 16,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: FilledButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+                onPressed: retry,
+              ),
             ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: _disconnect,
-            tooltip: 'Disconnect',
           ),
-        ],
-      ),
-      body: TerminalView(_terminal),
+      ],
     );
   }
 }
