@@ -29,6 +29,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   SSHClient? _client;
   SSHSession? _session;
   bool _connected = false;
+  bool _authFailed = false;
 
   Completer<String>? _inputCompleter;
   StringBuffer _inputBuffer = StringBuffer();
@@ -142,7 +143,19 @@ class _TerminalScreenState extends State<TerminalScreen> {
       setState(() => _connected = true);
     } catch (e) {
       _terminal.write('\r\nError: $e\r\n');
+      if (mounted) {
+        setState(() => _authFailed = true);
+      }
     }
+  }
+
+  Future<void> _retry() async {
+    setState(() => _authFailed = false);
+    _client?.close();
+    _client = null;
+    _session = null;
+    _terminal.write('\r\n');
+    await _connectSsh();
   }
 
   Future<void> _disconnect() async {
@@ -166,8 +179,18 @@ class _TerminalScreenState extends State<TerminalScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_connected ? 'Connected' : 'Connecting...'),
+        title: Text(_connected
+            ? 'Connected'
+            : _authFailed
+                ? 'Authentication failed'
+                : 'Connecting...'),
         actions: [
+          if (_authFailed)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _retry,
+              tooltip: 'Retry',
+            ),
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: _disconnect,
