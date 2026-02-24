@@ -6,17 +6,29 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `instance`, `proxy_connection`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProxyState`
-
 /// Connect to a remote iroh-ssh endpoint.
 /// Returns the local TCP port to connect an SSH client to.
-Future<int> connectIroh({required String endpointId}) =>
-    RustLib.instance.api.crateApiSimpleConnectIroh(endpointId: endpointId);
+///
+/// `relay_urls` replaces the default relay servers; `extra_relay_urls` adds alongside them.
+/// Pass empty vectors to use defaults.
+Future<int> connectIroh({
+  required String endpointId,
+  required List<String> relayUrls,
+  required List<String> extraRelayUrls,
+}) => RustLib.instance.api.crateApiSimpleConnectIroh(
+  endpointId: endpointId,
+  relayUrls: relayUrls,
+  extraRelayUrls: extraRelayUrls,
+);
 
-/// Disconnect and clean up.
-Future<void> disconnectIroh() =>
-    RustLib.instance.api.crateApiSimpleDisconnectIroh();
+/// Disconnect a connection by its port.
+Future<void> disconnectIroh({required int port}) =>
+    RustLib.instance.api.crateApiSimpleDisconnectIroh(port: port);
 
-/// Check if currently connected. Returns the local proxy port if connected.
-int? getProxyPort() => RustLib.instance.api.crateApiSimpleGetProxyPort();
+/// Disconnect all active connections.
+Future<void> disconnectAll() =>
+    RustLib.instance.api.crateApiSimpleDisconnectAll();
+
+/// Get the number of active connections.
+Future<BigInt> connectionCount() =>
+    RustLib.instance.api.crateApiSimpleConnectionCount();

@@ -57,7 +57,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
     try {
       final keys = await KeyStorage.instance.listKeys();
-      final port = await connectIroh(endpointId: endpointId);
+      final port = await connectIroh(endpointId: endpointId, relayUrls: [], extraRelayUrls: []);
 
       await ConnectionStorage.instance.save(target);
       await _loadConnections();

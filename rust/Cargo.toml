@@ -8,7 +8,7 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 flutter_rust_bridge = "=2.11.1"
-iroh = "0.94"
+iroh-ssh = { git = "https://github.com/futpib/iroh-ssh", branch = "flutter", default-features = false, features = ["flutter"] }
 tokio = { version = "1", features = ["macros", "io-util", "sync", "rt", "net"] }
 anyhow = "1"
 

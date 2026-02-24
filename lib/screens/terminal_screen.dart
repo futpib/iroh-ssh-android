@@ -149,7 +149,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   Future<void> _disconnect() async {
     _session?.close();
     _client?.close();
-    await disconnectIroh();
+    await disconnectIroh(port: widget.port);
     if (mounted) {
       Navigator.of(context).pop();
     }
@@ -159,7 +159,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   void dispose() {
     _session?.close();
     _client?.close();
-    disconnectIroh();
+    disconnectIroh(port: widget.port);
     super.dispose();
   }
 
