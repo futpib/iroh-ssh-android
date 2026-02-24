@@ -46,9 +46,8 @@ jobs:
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Latest Build
-          body: Automatically built APK from the latest source.
+          tag_name: ${{ github.sha }}
+          name: ${{ github.sha }}
+          body: Automatically built APK from ${{ github.sha }}.
           files: build/app/outputs/flutter-apk/app-release.apk
-          prerelease: true
           make_latest: true
