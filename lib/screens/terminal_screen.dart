@@ -122,11 +122,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _terminal.buffer.setCursor(0, 0);
 
       _session!.stdout.listen((data) {
-        _terminal.write(String.fromCharCodes(data));
+        _terminal.write(utf8.decode(data, allowMalformed: true));
       });
 
       _session!.stderr.listen((data) {
-        _terminal.write(String.fromCharCodes(data));
+        _terminal.write(utf8.decode(data, allowMalformed: true));
       });
 
       _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
