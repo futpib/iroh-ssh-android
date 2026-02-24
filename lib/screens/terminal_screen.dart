@@ -29,7 +29,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
   SSHClient? _client;
   SSHSession? _session;
   bool _connected = false;
-  bool _sessionEnded = false;
 
   Completer<String>? _inputCompleter;
   StringBuffer _inputBuffer = StringBuffer();
@@ -167,7 +166,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_connected ? 'Connected' : _sessionEnded ? 'Disconnected' : 'Connecting...'),
+        title: Text(_connected ? 'Connected' : 'Connecting...'),
         actions: [
           IconButton(
             icon: const Icon(Icons.close),
