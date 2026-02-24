@@ -41,7 +41,7 @@ jobs:
       - name: Set version from timestamp
         id: version
         run: |
-          echo "name=$(date -u +'%Y.%m.%d.%H.%M')" >> "$GITHUB_OUTPUT"
+          echo "name=$(date -u +'%y.%m.%d.%H.%M')" >> "$GITHUB_OUTPUT"
           echo "code=$(date -u +'%y%m%d%H%M')" >> "$GITHUB_OUTPUT"
 
       - name: Build APK
