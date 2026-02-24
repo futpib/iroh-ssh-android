@@ -191,7 +191,7 @@ class TerminalTabState extends State<TerminalTab>
     super.build(context);
     return Stack(
       children: [
-        TerminalView(_terminal),
+        TerminalView(_terminal, autofocus: true),
         if (_authFailed)
           Positioned(
             bottom: 16,
