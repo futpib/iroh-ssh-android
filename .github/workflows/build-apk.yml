@@ -38,11 +38,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Set version from timestamp
+      - name: Set version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          RELEASE_COUNT=$(gh release list --repo "${{ github.repository }}" --limit 10000 --json tagName --jq 'length' 2>/dev/null || echo "0")
+          BUILD_NUMBER=$((RELEASE_COUNT + 1))
           echo "name=$(date -u +'%y.%m.%d.%H.%M')" >> "$GITHUB_OUTPUT"
-          echo "code=$(date -u +'%y%m%d%H%M')" >> "$GITHUB_OUTPUT"
+          echo "code=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Build APK
         env:
