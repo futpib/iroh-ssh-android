@@ -38,15 +38,21 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Set version from timestamp
+        id: version
+        run: |
+          echo "name=$(date -u +'%Y.%m.%d.%H.%M.%S')" >> "$GITHUB_OUTPUT"
+          echo "code=$(date -u +'%y%m%d%H%M')" >> "$GITHUB_OUTPUT"
+
       - name: Build APK
         env:
           KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/keystore.jks', runner.temp) || '' }}
-        run: flutter build apk
+        run: flutter build apk --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
 
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.sha }}
-          name: ${{ github.sha }}
-          body: Automatically built APK from ${{ github.sha }}.
+          tag_name: ${{ steps.version.outputs.name }}
+          name: ${{ steps.version.outputs.name }}
+          body: Built from ${{ github.sha }}.
           files: build/app/outputs/flutter-apk/app-release.apk
