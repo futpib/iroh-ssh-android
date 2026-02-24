@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
+import 'package:iroh_ssh_app/screens/keys_screen.dart';
 import 'package:iroh_ssh_app/screens/terminal_screen.dart';
 
 class ConnectScreen extends StatefulWidget {
@@ -45,6 +47,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     });
 
     try {
+      final keys = await KeyStorage.instance.listKeys();
       final port = await connectIroh(endpointId: endpointId);
 
       if (!mounted) return;
@@ -55,6 +58,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
             host: 'localhost',
             port: port,
             username: username,
+            identities: keys.map((k) => k.keyPair).toList(),
           ),
         ),
       );
@@ -71,7 +75,20 @@ class _ConnectScreenState extends State<ConnectScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('iroh-ssh')),
+      appBar: AppBar(
+        title: const Text('iroh-ssh'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.vpn_key),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const KeysScreen()),
+              );
+            },
+            tooltip: 'Manage Keys',
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(

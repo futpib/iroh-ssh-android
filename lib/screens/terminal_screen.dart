@@ -10,12 +10,14 @@ class TerminalScreen extends StatefulWidget {
   final String host;
   final int port;
   final String username;
+  final List<SSHKeyPair> identities;
 
   const TerminalScreen({
     super.key,
     required this.host,
     required this.port,
     required this.username,
+    this.identities = const [],
   });
 
   @override
@@ -28,7 +30,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
   SSHSession? _session;
   bool _connected = false;
 
-  // For interactive password input in the terminal
   Completer<String>? _inputCompleter;
   StringBuffer _inputBuffer = StringBuffer();
   bool _inputEcho = true;
@@ -50,12 +51,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
     if (_inputCompleter != null && !_inputCompleter!.isCompleted) {
       for (final char in data.codeUnits) {
         if (char == 13 || char == 10) {
-          // Enter
           _terminal.write('\r\n');
           _inputCompleter!.complete(_inputBuffer.toString());
           _inputCompleter = null;
         } else if (char == 127 || char == 8) {
-          // Backspace
           if (_inputBuffer.isNotEmpty) {
             final s = _inputBuffer.toString();
             _inputBuffer = StringBuffer(s.substring(0, s.length - 1));
@@ -73,7 +72,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
       return;
     }
 
-    // Normal mode: forward to SSH session
     _session?.write(utf8.encode(data));
   }
 
@@ -88,6 +86,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _client = SSHClient(
         socket,
         username: widget.username,
+        identities: widget.identities,
         onPasswordRequest: () async {
           _terminal.write('Password: ');
           return await _readLineFromTerminal(echo: false);
