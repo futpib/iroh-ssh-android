@@ -5,16 +5,30 @@ import 'package:path_provider/path_provider.dart';
 
 class SavedConnection {
   final String target;
+  final List<String> relayUrls;
+  final List<String> extraRelayUrls;
 
-  SavedConnection({required this.target});
+  SavedConnection({
+    required this.target,
+    this.relayUrls = const [],
+    this.extraRelayUrls = const [],
+  });
 
   String get username => target.split('@').first;
   String get endpointId => target.split('@').skip(1).join('@');
 
-  Map<String, dynamic> toJson() => {'target': target};
+  Map<String, dynamic> toJson() => {
+        'target': target,
+        'relayUrls': relayUrls,
+        'extraRelayUrls': extraRelayUrls,
+      };
 
   factory SavedConnection.fromJson(Map<String, dynamic> json) {
-    return SavedConnection(target: json['target'] as String);
+    return SavedConnection(
+      target: json['target'] as String,
+      relayUrls: (json['relayUrls'] as List?)?.cast<String>() ?? [],
+      extraRelayUrls: (json['extraRelayUrls'] as List?)?.cast<String>() ?? [],
+    );
   }
 }
 
@@ -42,11 +56,14 @@ class ConnectionStorage {
     return _cache!;
   }
 
-  Future<void> save(String target) async {
+  Future<void> save(SavedConnection connection) async {
     final connections = await list();
-    if (connections.any((c) => c.target == target)) return;
-
-    connections.insert(0, SavedConnection(target: target));
+    final existing = connections.indexWhere((c) => c.target == connection.target);
+    if (existing >= 0) {
+      connections[existing] = connection;
+    } else {
+      connections.insert(0, connection);
+    }
     await _write(connections);
   }
 

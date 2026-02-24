@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:iroh_ssh_app/services/connection_storage.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/screens/keys_screen.dart';
+import 'package:iroh_ssh_app/screens/settings_screen.dart';
 import 'package:iroh_ssh_app/screens/terminal_screen.dart';
 
 class ConnectScreen extends StatefulWidget {
@@ -14,6 +16,8 @@ class ConnectScreen extends StatefulWidget {
 
 class _ConnectScreenState extends State<ConnectScreen> {
   final _targetController = TextEditingController();
+  final _relayUrlsController = TextEditingController();
+  final _extraRelayUrlsController = TextEditingController();
   bool _connecting = false;
   String? _error;
   List<SavedConnection> _savedConnections = [];
@@ -34,10 +38,22 @@ class _ConnectScreenState extends State<ConnectScreen> {
   @override
   void dispose() {
     _targetController.dispose();
+    _relayUrlsController.dispose();
+    _extraRelayUrlsController.dispose();
     super.dispose();
   }
 
-  Future<void> _connectTo(String target) async {
+  List<String> _parseLines(String text) {
+    return text
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> _connectTo(String target,
+      {List<String> relayUrls = const [],
+      List<String> extraRelayUrls = const []}) async {
     final String username;
     final String endpointId;
 
@@ -57,9 +73,25 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
     try {
       final keys = await KeyStorage.instance.listKeys();
-      final port = await connectIroh(endpointId: endpointId, relayUrls: [], extraRelayUrls: []);
+      final globalSettings = await SettingsStorage.instance.load();
 
-      await ConnectionStorage.instance.save(target);
+      final effectiveRelayUrls =
+          relayUrls.isNotEmpty ? relayUrls : globalSettings.relayUrls;
+      final effectiveExtraRelayUrls = extraRelayUrls.isNotEmpty
+          ? extraRelayUrls
+          : globalSettings.extraRelayUrls;
+
+      final port = await connectIroh(
+        endpointId: endpointId,
+        relayUrls: effectiveRelayUrls,
+        extraRelayUrls: effectiveExtraRelayUrls,
+      );
+
+      await ConnectionStorage.instance.save(SavedConnection(
+        target: target,
+        relayUrls: relayUrls,
+        extraRelayUrls: extraRelayUrls,
+      ));
       await _loadConnections();
 
       if (!mounted) return;
@@ -90,7 +122,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
       setState(() => _error = 'Paste a target like user@endpoint_id');
       return;
     }
-    await _connectTo(raw);
+    final relayUrls = _parseLines(_relayUrlsController.text);
+    final extraRelayUrls = _parseLines(_extraRelayUrlsController.text);
+    await _connectTo(raw,
+        relayUrls: relayUrls, extraRelayUrls: extraRelayUrls);
   }
 
   Future<void> _deleteConnection(SavedConnection connection) async {
@@ -118,12 +153,29 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
   }
 
+  void _onSavedConnectionTap(SavedConnection conn) {
+    _targetController.text = conn.target;
+    _relayUrlsController.text = conn.relayUrls.join('\n');
+    _extraRelayUrlsController.text = conn.extraRelayUrls.join('\n');
+    _connectTo(conn.target,
+        relayUrls: conn.relayUrls, extraRelayUrls: conn.extraRelayUrls);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('iroh-ssh'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+            },
+            tooltip: 'Settings',
+          ),
           IconButton(
             icon: const Icon(Icons.vpn_key),
             onPressed: () {
@@ -154,7 +206,44 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   enableSuggestions: false,
                   onSubmitted: (_) => _connect(),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 8),
+                ExpansionTile(
+                  title: const Text('Advanced'),
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  children: [
+                    TextField(
+                      controller: _relayUrlsController,
+                      decoration: const InputDecoration(
+                        labelText: 'Relay URLs',
+                        helperText: 'Replaces defaults. One URL per line.',
+                        helperMaxLines: 2,
+                        border: OutlineInputBorder(),
+                      ),
+                      maxLines: 3,
+                      style:
+                          const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                      autocorrect: false,
+                      enableSuggestions: false,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _extraRelayUrlsController,
+                      decoration: const InputDecoration(
+                        labelText: 'Extra Relay URLs',
+                        helperText: 'Added alongside defaults. One URL per line.',
+                        helperMaxLines: 2,
+                        border: OutlineInputBorder(),
+                      ),
+                      maxLines: 3,
+                      style:
+                          const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                      autocorrect: false,
+                      enableSuggestions: false,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
                 FilledButton(
                   onPressed: _connecting ? null : _connect,
                   child: _connecting
@@ -209,7 +298,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       icon: const Icon(Icons.delete_outline),
                       onPressed: () => _deleteConnection(conn),
                     ),
-                    onTap: _connecting ? null : () => _connectTo(conn.target),
+                    onTap: _connecting
+                        ? null
+                        : () => _onSavedConnectionTap(conn),
                   );
                 },
               ),
