@@ -51,15 +51,39 @@ class _RelayUrlListEditorState extends State<RelayUrlListEditor> {
     widget.onChanged(updated);
   }
 
+  Future<void> _editUrl(int index) async {
+    final url = await _showUrlDialog(
+      title: 'Edit ${widget.label}',
+      initialValue: widget.urls[index],
+      confirmLabel: 'Save',
+    );
+    if (url == null) return;
+
+    final updated = [...widget.urls];
+    updated[index] = url;
+    widget.onChanged(updated);
+  }
+
   Future<String?> _showAddDialog() {
-    final controller = TextEditingController();
+    return _showUrlDialog(
+      title: 'Add ${widget.label}',
+      confirmLabel: 'Add',
+    );
+  }
+
+  Future<String?> _showUrlDialog({
+    required String title,
+    required String confirmLabel,
+    String? initialValue,
+  }) {
+    final controller = TextEditingController(text: initialValue);
     String? error;
 
     return showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: Text('Add ${widget.label}'),
+          title: Text(title),
           content: TextField(
             controller: controller,
             decoration: InputDecoration(
@@ -111,7 +135,7 @@ class _RelayUrlListEditorState extends State<RelayUrlListEditor> {
                   Navigator.pop(ctx, controller.text.trim());
                 }
               },
-              child: const Text('Add'),
+              child: Text(confirmLabel),
             ),
           ],
         ),
@@ -167,6 +191,7 @@ class _RelayUrlListEditorState extends State<RelayUrlListEditor> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+                onTap: () => _editUrl(entry.key),
                 trailing: IconButton(
                   icon: const Icon(Icons.remove_circle_outline, size: 20),
                   onPressed: () => _removeUrl(entry.key),
