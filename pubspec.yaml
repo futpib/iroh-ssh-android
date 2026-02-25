@@ -42,6 +42,7 @@ dependencies:
   path_provider: ^2.1.5
   pinenacl: ^0.6.0
   flutter_foreground_task: ^9.2.0
+  mobile_scanner: ^7.2.0
 
 dev_dependencies:
   flutter_test:

@@ -1,4 +1,7 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
+import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/connection_storage.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
@@ -199,10 +202,27 @@ class _ConnectScreenState extends State<ConnectScreen> {
               children: [
                 TextField(
                   controller: _targetController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Target',
                     hintText: 'user@endpoint_id',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: Platform.isAndroid
+                        ? IconButton(
+                            icon: const Icon(Icons.qr_code_scanner),
+                            tooltip: 'Scan QR code',
+                            onPressed: () async {
+                              final result =
+                                  await Navigator.of(context).push<String>(
+                                MaterialPageRoute(
+                                  builder: (_) => const QrScannerScreen(),
+                                ),
+                              );
+                              if (result != null) {
+                                _targetController.text = result;
+                              }
+                            },
+                          )
+                        : null,
                   ),
                   autocorrect: false,
                   enableSuggestions: false,

@@ -1,4 +1,7 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
+import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 
 String? validateRelayUrl(String url) {
   final trimmed = url.trim();
@@ -63,6 +66,23 @@ class _RelayUrlListEditorState extends State<RelayUrlListEditor> {
               hintText: 'https://relay.example.com.',
               border: const OutlineInputBorder(),
               errorText: error,
+              suffixIcon: Platform.isAndroid
+                  ? IconButton(
+                      icon: const Icon(Icons.qr_code_scanner),
+                      tooltip: 'Scan QR code',
+                      onPressed: () async {
+                        final result =
+                            await Navigator.of(ctx).push<String>(
+                          MaterialPageRoute(
+                            builder: (_) => const QrScannerScreen(),
+                          ),
+                        );
+                        if (result != null) {
+                          controller.text = result;
+                        }
+                      },
+                    )
+                  : null,
             ),
             style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
             autocorrect: false,
