@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:xterm/xterm.dart';
@@ -33,6 +37,19 @@ class TerminalTabState extends State<TerminalTab>
   StringBuffer _inputBuffer = StringBuffer();
   bool _inputEcho = true;
 
+  // Stdout batching — flush via short timer to coalesce burst packets
+  static const _batchDuration = Duration(milliseconds: 2);
+  final _stdoutBuffer = BytesBuilder(copy: false);
+  Timer? _stdoutFlushTimer;
+  final _stderrBuffer = BytesBuilder(copy: false);
+  Timer? _stderrFlushTimer;
+
+  // Keypress-to-frame latency tracking (debug only)
+  Stopwatch? _keypressSw;
+  String? _keypressData;
+  String? _keypressLabel;
+  bool _framePending = false;
+
   bool get connected => _connected;
 
   @override
@@ -41,6 +58,9 @@ class TerminalTabState extends State<TerminalTab>
   @override
   void initState() {
     super.initState();
+    if (kDebugMode) {
+      SchedulerBinding.instance.addTimingsCallback(_onFrameTimings);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _connectSsh();
     });
@@ -78,7 +98,99 @@ class TerminalTabState extends State<TerminalTab>
       return;
     }
 
+    if (kDebugMode) {
+      _keypressData = data;
+      final onOutputMs = _keypressSw?.elapsedMilliseconds;
+      debugPrint(
+          '[ssh-perf][input] keyEvent→onOutput: ${onOutputMs ?? '?'}ms');
+    }
     _session?.write(utf8.encode(data));
+  }
+
+  void _onFrameTimings(List<FrameTiming> timings) {
+    for (final t in timings) {
+      final buildMs = t.buildDuration.inMilliseconds;
+      final rasterMs = t.rasterDuration.inMilliseconds;
+      final totalMs = t.totalSpan.inMilliseconds;
+      if (totalMs > 4) {
+        debugPrint(
+            '[ssh-perf][frame] build: ${buildMs}ms, raster: ${rasterMs}ms, total: ${totalMs}ms');
+      }
+    }
+  }
+
+  KeyEventResult _onKeyEventPerf(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      _keypressSw = Stopwatch()..start();
+      _keypressLabel = event.logicalKey.keyLabel;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  int _stdoutBatchCount = 0;
+  int _stdoutPacketCount = 0;
+
+  void _flushStdout() {
+    _stdoutFlushTimer = null;
+    final packets = _stdoutPacketCount;
+    _stdoutPacketCount = 0;
+    final bytes = _stdoutBuffer.takeBytes();
+    _stdoutBatchCount++;
+    if (kDebugMode) {
+      debugPrint(
+          '[ssh-perf][batch] stdout flush #$_stdoutBatchCount: ${bytes.length} bytes ($packets packets)');
+    }
+    _terminal.write(utf8.decode(bytes, allowMalformed: true));
+    if (kDebugMode) {
+      _scheduleFrameLatencyLog('stdout', bytes.length);
+    }
+  }
+
+  int _stderrBatchCount = 0;
+  int _stderrPacketCount = 0;
+
+  void _flushStderr() {
+    _stderrFlushTimer = null;
+    final packets = _stderrPacketCount;
+    _stderrPacketCount = 0;
+    final bytes = _stderrBuffer.takeBytes();
+    _stderrBatchCount++;
+    if (kDebugMode) {
+      debugPrint(
+          '[ssh-perf][batch] stderr flush #$_stderrBatchCount: ${bytes.length} bytes ($packets packets)');
+    }
+    _terminal.write(utf8.decode(bytes, allowMalformed: true));
+    if (kDebugMode) {
+      _scheduleFrameLatencyLog('stderr', bytes.length);
+    }
+  }
+
+  void _scheduleFrameLatencyLog(String channel, int bytes) {
+    if (!kDebugMode || _framePending) return;
+    final sw = _keypressSw;
+    final input = _keypressData;
+    final label = _keypressLabel;
+    final recvMs = sw?.elapsedMilliseconds;
+    _framePending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _framePending = false;
+      final frameMs = sw?.elapsedMilliseconds;
+      if (sw != null && input != null) {
+        final escaped = input.codeUnits
+            .map((c) => c >= 0x20 && c < 0x7f
+                ? String.fromCharCode(c)
+                : '\\x${c.toRadixString(16).padLeft(2, '0')}')
+            .join();
+        debugPrint(
+            '[ssh-perf][$channel] keyEvent→recv: ${recvMs}ms, keyEvent→frame: ${frameMs}ms, key: ${label ?? '?'}, output: "$escaped" ($bytes bytes)');
+        _keypressSw = null;
+        _keypressData = null;
+        _keypressLabel = null;
+      } else {
+        debugPrint(
+            '[ssh-perf][$channel] recv→frame (unsolicited, $bytes bytes)');
+      }
+    });
   }
 
   Future<void> _connectSsh() async {
@@ -88,8 +200,12 @@ class TerminalTabState extends State<TerminalTab>
       _terminal.write(
           'Connecting to ${widget.session.host}:${widget.session.port}...\r\n');
 
+      final connectSw = kDebugMode ? (Stopwatch()..start()) : null;
+
       final socket = await SSHSocket.connect(
           widget.session.host, widget.session.port);
+
+      final socketMs = connectSw?.elapsedMilliseconds;
 
       _client = SSHClient(
         socket,
@@ -119,6 +235,8 @@ class TerminalTabState extends State<TerminalTab>
 
       _terminal.write('Authenticating...\r\n');
 
+      final authMs = connectSw?.elapsedMilliseconds;
+
       _session = await _client!.shell(
         pty: SSHPtyConfig(
           width: _terminal.viewWidth,
@@ -126,15 +244,25 @@ class TerminalTabState extends State<TerminalTab>
         ),
       );
 
+      if (kDebugMode) {
+        final shellMs = connectSw!.elapsedMilliseconds;
+        debugPrint(
+            '[ssh-perf][connect] socket: ${socketMs}ms, auth: ${authMs! - socketMs!}ms, shell: ${shellMs - authMs}ms');
+      }
+
       _terminal.buffer.clear();
       _terminal.buffer.setCursor(0, 0);
 
       _session!.stdout.listen((data) {
-        _terminal.write(utf8.decode(data, allowMalformed: true));
+        _stdoutBuffer.add(data);
+        _stdoutPacketCount++;
+        _stdoutFlushTimer ??= Timer(_batchDuration, _flushStdout);
       });
 
       _session!.stderr.listen((data) {
-        _terminal.write(utf8.decode(data, allowMalformed: true));
+        _stderrBuffer.add(data);
+        _stderrPacketCount++;
+        _stderrFlushTimer ??= Timer(_batchDuration, _flushStderr);
       });
 
       _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
@@ -180,6 +308,11 @@ class TerminalTabState extends State<TerminalTab>
 
   @override
   void dispose() {
+    _stdoutFlushTimer?.cancel();
+    _stderrFlushTimer?.cancel();
+    if (kDebugMode) {
+      SchedulerBinding.instance.removeTimingsCallback(_onFrameTimings);
+    }
     _session?.close();
     _client?.close();
     disconnectIroh(port: widget.session.port);
@@ -191,7 +324,11 @@ class TerminalTabState extends State<TerminalTab>
     super.build(context);
     return Stack(
       children: [
-        TerminalView(_terminal, autofocus: true),
+        TerminalView(
+          _terminal,
+          autofocus: true,
+          onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
+        ),
         if (_authFailed)
           Positioned(
             bottom: 16,
