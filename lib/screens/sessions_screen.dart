@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/screens/connect_screen.dart';
+import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/widgets/terminal_tab.dart';
 
 class SessionsScreen extends StatefulWidget {
@@ -143,6 +144,76 @@ class _SessionsScreenState extends State<SessionsScreen>
     }
   }
 
+  Future<void> _showConnectionInfo(SshSessionInfo session) async {
+    IrohConnectionInfo? irohInfo;
+    String? irohError;
+    try {
+      irohInfo = await connectionInfo(port: session.port);
+    } catch (e) {
+      irohError = e.toString();
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Connection Info'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _infoRow('Target', session.displayName),
+            _infoRow('Username', session.username),
+            _infoRow('Local port', session.port.toString()),
+            if (irohError != null)
+              _infoRow('Error', irohError),
+            if (irohInfo != null) ...[
+              _infoRow(
+                'Path',
+                irohInfo.isDirect
+                    ? 'Direct'
+                    : irohInfo.isRelay
+                        ? 'Relay'
+                        : 'Unknown',
+              ),
+              if (irohInfo.relayUrl != null)
+                _infoRow('Relay', irohInfo.relayUrl!),
+              if (irohInfo.latencyMs != null)
+                _infoRow(
+                  'Latency',
+                  '${irohInfo.latencyMs!.toStringAsFixed(1)} ms',
+                ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 2),
+          SelectableText(
+            value,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<bool> _onWillPop() async {
     if (_sessions.isEmpty) return true;
 
@@ -198,6 +269,11 @@ class _SessionsScreenState extends State<SessionsScreen>
             : AppBar(
                 title: Text(currentSession.displayName),
                 actions: [
+                  IconButton(
+                    icon: const Icon(Icons.info_outline),
+                    onPressed: () => _showConnectionInfo(currentSession),
+                    tooltip: 'Connection info',
+                  ),
                   IconButton(
                     icon: const Icon(Icons.add),
                     onPressed: _addSession,

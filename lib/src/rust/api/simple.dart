@@ -32,3 +32,39 @@ Future<void> disconnectAll() =>
 /// Get the number of active connections.
 Future<BigInt> connectionCount() =>
     RustLib.instance.api.crateApiSimpleConnectionCount();
+
+/// Query connection info for an active connection by its port.
+/// Returns `None` if no iroh connection has been established yet.
+Future<IrohConnectionInfo?> connectionInfo({required int port}) =>
+    RustLib.instance.api.crateApiSimpleConnectionInfo(port: port);
+
+class IrohConnectionInfo {
+  final bool isDirect;
+  final bool isRelay;
+  final String? relayUrl;
+  final double? latencyMs;
+
+  const IrohConnectionInfo({
+    required this.isDirect,
+    required this.isRelay,
+    this.relayUrl,
+    this.latencyMs,
+  });
+
+  @override
+  int get hashCode =>
+      isDirect.hashCode ^
+      isRelay.hashCode ^
+      relayUrl.hashCode ^
+      latencyMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is IrohConnectionInfo &&
+          runtimeType == other.runtimeType &&
+          isDirect == other.isDirect &&
+          isRelay == other.isRelay &&
+          relayUrl == other.relayUrl &&
+          latencyMs == other.latencyMs;
+}

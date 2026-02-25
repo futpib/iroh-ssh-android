@@ -1,5 +1,12 @@
 use flutter_rust_bridge::frb;
 
+pub struct IrohConnectionInfo {
+    pub is_direct: bool,
+    pub is_relay: bool,
+    pub relay_url: Option<String>,
+    pub latency_ms: Option<f64>,
+}
+
 #[frb(init)]
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
@@ -15,12 +22,12 @@ pub async fn connect_iroh(
     relay_urls: Vec<String>,
     extra_relay_urls: Vec<String>,
 ) -> anyhow::Result<u16> {
-    iroh_ssh::bridge::connect_iroh(endpoint_id, relay_urls, extra_relay_urls).await
+    iroh_ssh::bridge::connect(endpoint_id, relay_urls, extra_relay_urls).await
 }
 
 /// Disconnect a connection by its port.
 pub async fn disconnect_iroh(port: u16) -> anyhow::Result<()> {
-    iroh_ssh::bridge::disconnect_iroh(port).await
+    iroh_ssh::bridge::disconnect(port).await
 }
 
 /// Disconnect all active connections.
@@ -30,5 +37,17 @@ pub async fn disconnect_all() -> anyhow::Result<()> {
 
 /// Get the number of active connections.
 pub async fn connection_count() -> usize {
-    iroh_ssh::bridge::connection_count().await
+    iroh_ssh::bridge::connections().await.len()
+}
+
+/// Query connection info for an active connection by its port.
+/// Returns `None` if no iroh connection has been established yet.
+pub async fn connection_info(port: u16) -> anyhow::Result<Option<IrohConnectionInfo>> {
+    let info = iroh_ssh::bridge::connection_info(port).await?;
+    Ok(info.map(|i| IrohConnectionInfo {
+        is_direct: i.is_direct,
+        is_relay: i.is_relay,
+        relay_url: i.relay_url,
+        latency_ms: i.latency_ms,
+    }))
 }
