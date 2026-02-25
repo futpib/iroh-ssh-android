@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
@@ -144,73 +145,10 @@ class _SessionsScreenState extends State<SessionsScreen>
     }
   }
 
-  Future<void> _showConnectionInfo(SshSessionInfo session) async {
-    IrohConnectionInfo? irohInfo;
-    String? irohError;
-    try {
-      irohInfo = await connectionInfo(port: session.port);
-    } catch (e) {
-      irohError = e.toString();
-    }
-
-    if (!mounted) return;
-
+  void _showConnectionInfo(SshSessionInfo session) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Connection Info'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _infoRow('Target', session.displayName),
-            _infoRow('Username', session.username),
-            _infoRow('Local port', session.port.toString()),
-            if (irohError != null)
-              _infoRow('Error', irohError),
-            if (irohInfo != null) ...[
-              _infoRow(
-                'Path',
-                irohInfo.isDirect
-                    ? 'Direct'
-                    : irohInfo.isRelay
-                        ? 'Relay'
-                        : 'Unknown',
-              ),
-              if (irohInfo.relayUrl != null)
-                _infoRow('Relay', irohInfo.relayUrl!),
-              if (irohInfo.latencyMs != null)
-                _infoRow(
-                  'Latency',
-                  '${irohInfo.latencyMs!.toStringAsFixed(1)} ms',
-                ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _infoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 2),
-          SelectableText(
-            value,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-          ),
-        ],
-      ),
+      builder: (ctx) => _ConnectionInfoDialog(session: session),
     );
   }
 
@@ -323,5 +261,101 @@ class _SessionsScreenState extends State<SessionsScreen>
       return WithForegroundTask(child: scaffold);
     }
     return scaffold;
+  }
+}
+
+class _ConnectionInfoDialog extends StatefulWidget {
+  final SshSessionInfo session;
+
+  const _ConnectionInfoDialog({required this.session});
+
+  @override
+  State<_ConnectionInfoDialog> createState() => _ConnectionInfoDialogState();
+}
+
+class _ConnectionInfoDialogState extends State<_ConnectionInfoDialog> {
+  IrohConnectionInfo? _irohInfo;
+  String? _irohError;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _fetch());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetch() async {
+    try {
+      final info = await connectionInfo(port: widget.session.port);
+      if (mounted) setState(() { _irohInfo = info; _irohError = null; });
+    } catch (e) {
+      if (mounted) setState(() => _irohError = e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = widget.session;
+    return AlertDialog(
+      title: const Text('Connection Info'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _infoRow('Target', session.displayName),
+          _infoRow('Username', session.username),
+          _infoRow('Local port', session.port.toString()),
+          if (_irohError != null)
+            _infoRow('Error', _irohError!),
+          if (_irohInfo != null) ...[
+            _infoRow(
+              'Path',
+              _irohInfo!.isDirect
+                  ? 'Direct'
+                  : _irohInfo!.isRelay
+                      ? 'Relay'
+                      : 'Unknown',
+            ),
+            if (_irohInfo!.relayUrl != null)
+              _infoRow('Relay', _irohInfo!.relayUrl!),
+            if (_irohInfo!.latencyMs != null)
+              _infoRow(
+                'Latency',
+                '${_irohInfo!.latencyMs!.toStringAsFixed(1)} ms',
+              ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+
+  static Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 2),
+          SelectableText(
+            value,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          ),
+        ],
+      ),
+    );
   }
 }
