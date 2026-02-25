@@ -41,6 +41,7 @@ dependencies:
   dartssh2: ^2.13.0
   path_provider: ^2.1.5
   pinenacl: ^0.6.0
+  flutter_foreground_task: ^9.2.0
 
 dev_dependencies:
   flutter_test:

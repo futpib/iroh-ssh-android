@@ -1,4 +1,7 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/screens/connect_screen.dart';
 import 'package:iroh_ssh_app/widgets/terminal_tab.dart';
@@ -17,6 +20,8 @@ class SessionsScreen extends StatefulWidget {
 
 class _SessionsScreenState extends State<SessionsScreen>
     with TickerProviderStateMixin {
+  static final bool _isAndroid = Platform.isAndroid;
+
   late List<SshSessionInfo> _sessions;
   late TabController _tabController;
   final Map<int, GlobalKey<TerminalTabState>> _tabKeys = {};
@@ -28,6 +33,53 @@ class _SessionsScreenState extends State<SessionsScreen>
     _tabController = TabController(length: 1, vsync: this);
     _tabController.addListener(_onTabChanged);
     _tabKeys[widget.initialSession.port] = GlobalKey<TerminalTabState>();
+    if (_isAndroid) {
+      _initForegroundTask();
+    }
+  }
+
+  Future<void> _initForegroundTask() async {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'iroh_ssh_foreground',
+        channelName: 'SSH Session',
+        channelDescription: 'Keeps SSH sessions alive in the background',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.nothing(),
+        autoRunOnBoot: false,
+        autoRunOnMyPackageReplaced: false,
+        allowWakeLock: true,
+        allowWifiLock: true,
+      ),
+    );
+
+    await FlutterForegroundTask.requestNotificationPermission();
+    await FlutterForegroundTask.startService(
+      notificationTitle: 'iroh-ssh',
+      notificationText: _notificationText,
+    );
+  }
+
+  String get _notificationText {
+    final count = _sessions.length;
+    return '$count active session${count > 1 ? 's' : ''}';
+  }
+
+  Future<void> _updateNotification() async {
+    if (!_isAndroid) return;
+    await FlutterForegroundTask.updateService(
+      notificationTitle: 'iroh-ssh',
+      notificationText: _notificationText,
+    );
+  }
+
+  Future<void> _stopForegroundTask() async {
+    if (!_isAndroid) return;
+    await FlutterForegroundTask.stopService();
   }
 
   void _onTabChanged() {
@@ -40,6 +92,7 @@ class _SessionsScreenState extends State<SessionsScreen>
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _stopForegroundTask();
     super.dispose();
   }
 
@@ -67,6 +120,7 @@ class _SessionsScreenState extends State<SessionsScreen>
         _rebuildTabController(_sessions.length,
             newIndex: _sessions.length - 1);
       });
+      _updateNotification();
     }
   }
 
@@ -77,12 +131,16 @@ class _SessionsScreenState extends State<SessionsScreen>
     setState(() {
       _sessions.removeAt(index);
       if (_sessions.isEmpty) {
+        _stopForegroundTask();
         Navigator.of(context).pop();
         return;
       }
       final newIndex = index >= _sessions.length ? _sessions.length - 1 : index;
       _rebuildTabController(_sessions.length, newIndex: newIndex);
     });
+    if (_sessions.isNotEmpty) {
+      _updateNotification();
+    }
   }
 
   Future<bool> _onWillPop() async {
@@ -119,11 +177,12 @@ class _SessionsScreenState extends State<SessionsScreen>
 
     final currentSession = _sessions[_tabController.index];
 
-    return PopScope(
+    final scaffold = PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         if (await _onWillPop()) {
+          await _stopForegroundTask();
           if (context.mounted) {
             Navigator.of(context).pop();
           }
@@ -175,5 +234,10 @@ class _SessionsScreenState extends State<SessionsScreen>
         ),
       ),
     );
+
+    if (_isAndroid) {
+      return WithForegroundTask(child: scaffold);
+    }
+    return scaffold;
   }
 }
