@@ -34,6 +34,8 @@ class TerminalTabState extends State<TerminalTab>
   bool _authFailed = false;
   bool _ctrlActive = false;
   bool _altActive = false;
+  double? _terminalHeight;
+  bool _keyboardOpen = false;
 
   Completer<String>? _inputCompleter;
   StringBuffer _inputBuffer = StringBuffer();
@@ -282,7 +284,9 @@ class TerminalTabState extends State<TerminalTab>
       });
 
       _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
-        _session?.resizeTerminal(width, height);
+        if (!_keyboardOpen) {
+          _session?.resizeTerminal(width, height);
+        }
       };
 
       _session!.done.then((_) {
@@ -458,26 +462,47 @@ class TerminalTabState extends State<TerminalTab>
     final mediaQuery = MediaQuery.of(context);
     final keyboardHeight = mediaQuery.viewInsets.bottom;
     final keyboardOpen = keyboardHeight > 0;
+    _keyboardOpen = keyboardOpen;
     return LayoutBuilder(
       builder: (context, constraints) {
         final toolbarHeight = keyboardOpen ? _toolbarHeight : 0.0;
-        final terminalHeight = constraints.maxHeight - toolbarHeight;
+        if (!keyboardOpen) {
+          _terminalHeight = constraints.maxHeight;
+        }
+        final terminalHeight = _terminalHeight ?? constraints.maxHeight - toolbarHeight;
+        if (kDebugMode) {
+          debugPrint(
+              '[layout] keyboardOpen=$keyboardOpen, '
+              'keyboardHeight=$keyboardHeight, '
+              'constraints=${constraints.maxHeight}, '
+              '_terminalHeight=$_terminalHeight, '
+              'terminalHeight=$terminalHeight, '
+              'toolbarHeight=$toolbarHeight, '
+              'total=${terminalHeight + toolbarHeight}, '
+              'viewWidth=${_terminal.viewWidth}, '
+              'viewHeight=${_terminal.viewHeight}');
+        }
+        final slideUp = keyboardOpen
+            ? keyboardHeight + toolbarHeight - (constraints.maxHeight - terminalHeight)
+            : 0.0;
         return Stack(
-          clipBehavior: Clip.none,
           children: [
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: keyboardHeight,
-              height: terminalHeight + toolbarHeight,
+            Transform.translate(
+              offset: Offset(0, -slideUp),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   SizedBox(
                     height: terminalHeight,
-                    child: TerminalView(
-                      _terminal,
-                      autofocus: true,
-                      onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
+                    child: MediaQuery.removePadding(
+                      context: context,
+                      removeTop: true,
+                      removeBottom: true,
+                      child: TerminalView(
+                        _terminal,
+                        autofocus: true,
+                        onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
+                      ),
                     ),
                   ),
                   if (keyboardOpen) _buildToolbar(),

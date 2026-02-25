@@ -188,40 +188,45 @@ class _SessionsScreenState extends State<SessionsScreen>
           }
         }
       },
-      child: Scaffold(
+      child: Builder(
+        builder: (context) {
+          final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+          return Scaffold(
         resizeToAvoidBottomInset: false,
-        appBar: AppBar(
-          title: Text(currentSession.displayName),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: _addSession,
-              tooltip: 'New connection',
-            ),
-          ],
-          bottom: _sessions.length > 1
-              ? TabBar(
-                  controller: _tabController,
-                  isScrollable: true,
-                  tabs: List.generate(_sessions.length, (i) {
-                    final session = _sessions[i];
-                    return Tab(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(session.username),
-                          const SizedBox(width: 4),
-                          GestureDetector(
-                            onTap: () => _closeSession(i),
-                            child: const Icon(Icons.close, size: 16),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                )
-              : null,
-        ),
+        appBar: keyboardOpen
+            ? null
+            : AppBar(
+                title: Text(currentSession.displayName),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: _addSession,
+                    tooltip: 'New connection',
+                  ),
+                ],
+                bottom: _sessions.length > 1
+                    ? TabBar(
+                        controller: _tabController,
+                        isScrollable: true,
+                        tabs: List.generate(_sessions.length, (i) {
+                          final session = _sessions[i];
+                          return Tab(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(session.username),
+                                const SizedBox(width: 4),
+                                GestureDetector(
+                                  onTap: () => _closeSession(i),
+                                  child: const Icon(Icons.close, size: 16),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      )
+                    : null,
+              ),
         body: TabBarView(
           controller: _tabController,
           children: List.generate(_sessions.length, (i) {
@@ -233,6 +238,8 @@ class _SessionsScreenState extends State<SessionsScreen>
             );
           }),
         ),
+      );
+        },
       ),
     );
 
