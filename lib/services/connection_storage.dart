@@ -5,11 +5,13 @@ import 'package:path_provider/path_provider.dart';
 
 class SavedConnection {
   final String target;
+  final bool overrideRelays;
   final bool useDefaultRelays;
   final List<String> customRelayUrls;
 
   SavedConnection({
     required this.target,
+    this.overrideRelays = false,
     this.useDefaultRelays = true,
     this.customRelayUrls = const [],
   });
@@ -19,6 +21,7 @@ class SavedConnection {
 
   Map<String, dynamic> toJson() => {
         'target': target,
+        'overrideRelays': overrideRelays,
         'useDefaultRelays': useDefaultRelays,
         'customRelayUrls': customRelayUrls,
       };
@@ -27,6 +30,7 @@ class SavedConnection {
     if (json.containsKey('useDefaultRelays')) {
       return SavedConnection(
         target: json['target'] as String,
+        overrideRelays: json['overrideRelays'] as bool? ?? false,
         useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
         customRelayUrls:
             (json['customRelayUrls'] as List?)?.cast<String>() ?? [],

@@ -22,6 +22,7 @@ class ConnectScreen extends StatefulWidget {
 
 class _ConnectScreenState extends State<ConnectScreen> {
   final _targetController = TextEditingController();
+  bool _overrideRelays = false;
   bool _useDefaultRelays = true;
   List<String> _customRelayUrls = [];
   bool _connecting = false;
@@ -48,7 +49,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
   }
 
   Future<void> _connectTo(String target,
-      {bool useDefaultRelays = true,
+      {bool overrideRelays = false,
+      bool useDefaultRelays = true,
       List<String> customRelayUrls = const []}) async {
     final String username;
     final String endpointId;
@@ -72,9 +74,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
       final globalSettings = await SettingsStorage.instance.load();
 
       final effectiveUseDefaultRelays =
-          customRelayUrls.isNotEmpty ? useDefaultRelays : globalSettings.useDefaultRelays;
+          overrideRelays ? useDefaultRelays : globalSettings.useDefaultRelays;
       final effectiveCustomRelayUrls =
-          customRelayUrls.isNotEmpty ? customRelayUrls : globalSettings.customRelayUrls;
+          overrideRelays ? customRelayUrls : globalSettings.customRelayUrls;
 
       final List<String> relayUrls;
       final List<String> extraRelayUrls;
@@ -94,6 +96,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
       await ConnectionStorage.instance.save(SavedConnection(
         target: target,
+        overrideRelays: overrideRelays,
         useDefaultRelays: useDefaultRelays,
         customRelayUrls: customRelayUrls,
       ));
@@ -135,6 +138,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
       return;
     }
     await _connectTo(raw,
+        overrideRelays: _overrideRelays,
         useDefaultRelays: _useDefaultRelays,
         customRelayUrls: _customRelayUrls);
   }
@@ -167,10 +171,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
   void _onSavedConnectionTap(SavedConnection conn) {
     setState(() {
       _targetController.text = conn.target;
+      _overrideRelays = conn.overrideRelays;
       _useDefaultRelays = conn.useDefaultRelays;
       _customRelayUrls = List.of(conn.customRelayUrls);
     });
     _connectTo(conn.target,
+        overrideRelays: conn.overrideRelays,
         useDefaultRelays: conn.useDefaultRelays,
         customRelayUrls: conn.customRelayUrls);
   }
@@ -236,21 +242,30 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   children: [
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Use default relays'),
-                      value: _useDefaultRelays,
+                      title: const Text('Override global relay settings'),
+                      value: _overrideRelays,
                       onChanged: (value) =>
-                          setState(() => _useDefaultRelays = value),
+                          setState(() => _overrideRelays = value),
                     ),
-                    const SizedBox(height: 8),
-                    RelayUrlListEditor(
-                      label: 'Custom relays',
-                      helperText: _useDefaultRelays
-                          ? 'Added alongside defaults for this connection.'
-                          : 'Replaces defaults for this connection.',
-                      urls: _customRelayUrls,
-                      onChanged: (urls) =>
-                          setState(() => _customRelayUrls = urls),
-                    ),
+                    if (_overrideRelays) ...[
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Use default relays'),
+                        value: _useDefaultRelays,
+                        onChanged: (value) =>
+                            setState(() => _useDefaultRelays = value),
+                      ),
+                      const SizedBox(height: 8),
+                      RelayUrlListEditor(
+                        label: 'Custom relays',
+                        helperText: _useDefaultRelays
+                            ? 'Added alongside defaults for this connection.'
+                            : 'Replaces defaults for this connection.',
+                        urls: _customRelayUrls,
+                        onChanged: (urls) =>
+                            setState(() => _customRelayUrls = urls),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 16),
