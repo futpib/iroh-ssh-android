@@ -313,8 +313,10 @@ class _ConnectionInfoDialogState extends State<_ConnectionInfoDialog> {
           _infoRow('Username', session.username),
           _infoRow('Local port', session.port.toString()),
           if (_irohError != null)
-            _infoRow('Error', _irohError!),
-          if (_irohInfo != null) ...[
+            _infoRow('Error', _irohError!)
+          else if (_irohInfo == null)
+            _infoRow('Network', 'Waiting for connection...')
+          else ...[
             _infoRow(
               'Path',
               _irohInfo!.isDirect
