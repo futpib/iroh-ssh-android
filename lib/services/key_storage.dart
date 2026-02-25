@@ -101,6 +101,12 @@ class KeyStorage {
     return keys;
   }
 
+  Future<String> readPrivateKeyPem(String name) async {
+    final dir = await _keyDir;
+    final file = File('${dir.path}/$name');
+    return await file.readAsString();
+  }
+
   Future<void> deleteKey(String name) async {
     final dir = await _keyDir;
     final file = File('${dir.path}/$name');

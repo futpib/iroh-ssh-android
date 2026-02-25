@@ -1,5 +1,11 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/widgets/relay_url_list_editor.dart';
@@ -132,6 +138,14 @@ class _SettingsScreenState extends State<SettingsScreen>
             },
             child: const Text('Copy'),
           ),
+          if (Platform.isAndroid)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _exportPrivateKey(key);
+              },
+              child: const Text('Export'),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Close'),
@@ -139,6 +153,87 @@ class _SettingsScreenState extends State<SettingsScreen>
         ],
       ),
     );
+  }
+
+  Future<void> _exportPrivateKey(StoredKey key) async {
+    final localAuth = LocalAuthentication();
+    try {
+      final authenticated = await localAuth.authenticate(
+        localizedReason: 'Authenticate to export private key',
+      );
+      if (!authenticated) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Authentication failed')),
+          );
+        }
+        return;
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Authentication error: $e')),
+        );
+      }
+      return;
+    }
+
+    try {
+      final pem = await KeyStorage.instance.readPrivateKeyPem(key.name);
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Private Key'),
+          content: SelectableText(
+            pem,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: pem));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Private key copied')),
+                );
+                Navigator.pop(ctx);
+              },
+              child: const Text('Copy'),
+            ),
+            if (Platform.isAndroid)
+              TextButton(
+                onPressed: () async {
+                  try {
+                    await FileSaver.instance.saveAs(
+                      name: key.name,
+                      fileExtension: '',
+                      mimeType: MimeType.text,
+                      bytes: utf8.encode(pem),
+                    );
+                  } catch (e) {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(content: Text('Error saving file: $e')),
+                      );
+                    }
+                  }
+                },
+                child: const Text('Save'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error reading key: $e')),
+        );
+      }
+    }
   }
 
   Future<String?> _showNameDialog(String title, String label) {
@@ -175,12 +270,26 @@ class _SettingsScreenState extends State<SettingsScreen>
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Paste Private Key'),
+        title: const Text('Import Private Key'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: '-----BEGIN OPENSSH PRIVATE KEY-----\n...',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.file_open),
+              tooltip: 'Pick file',
+              onPressed: () async {
+                final result = await FilePicker.platform.pickFiles(
+                  type: FileType.any,
+                  withData: true,
+                );
+                if (result != null && result.files.single.bytes != null) {
+                  controller.text =
+                      utf8.decode(result.files.single.bytes!);
+                }
+              },
+            ),
           ),
           maxLines: 8,
           style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
@@ -246,8 +355,11 @@ class _SettingsScreenState extends State<SettingsScreen>
               fontSize: 11,
             ),
           ),
+          trailing: IconButton(
+            icon: const Icon(Icons.delete),
+            onPressed: () => _deleteKey(key),
+          ),
           onTap: () => _showPublicKeyDialog(key),
-          onLongPress: () => _deleteKey(key),
         );
       },
     );
