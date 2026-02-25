@@ -1874,7 +1874,7 @@ dependencies = [
 [[package]]
 name = "iroh-ssh"
 version = "0.2.8"
-source = "git+https://github.com/futpib/iroh-ssh?branch=flutter#073a3aef2c1b7faf9a3d781244053a11c066bf30"
+source = "git+https://github.com/futpib/iroh-ssh?branch=flutter#28ac5f59a7e768e46f02234019c44657a50ed903"
 dependencies = [
  "anyhow",
  "ed25519-dalek 2.2.0",
