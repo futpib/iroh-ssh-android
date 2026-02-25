@@ -361,6 +361,8 @@ class TerminalTabState extends State<TerminalTab>
     if (_altActive) setState(() => _altActive = false);
   }
 
+  static const double _toolbarHeight = 64;
+
   void _sendChar(String char) {
     _terminal.textInput(char);
   }
@@ -368,7 +370,6 @@ class TerminalTabState extends State<TerminalTab>
   Widget _buildToolbar() {
     return Container(
       color: const Color(0xFF1E1E1E),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -383,7 +384,6 @@ class TerminalTabState extends State<TerminalTab>
               _toolbarButton('PGUP', () => _sendKey(TerminalKey.pageUp)),
             ],
           ),
-          const SizedBox(height: 2),
           Row(
             children: [
               _toolbarButton('TAB', () => _sendKey(TerminalKey.tab)),
@@ -406,13 +406,16 @@ class TerminalTabState extends State<TerminalTab>
 
   Widget _toolbarButton(String label, VoidCallback onPressed) {
     return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 1),
+      child: SizedBox(
+        height: 32,
         child: MaterialButton(
           minWidth: 0,
           height: 32,
           padding: EdgeInsets.zero,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: const RoundedRectangleBorder(),
           color: const Color(0xFF2D2D2D),
+          elevation: 0,
           onPressed: onPressed,
           child: Text(
             label,
@@ -425,13 +428,16 @@ class TerminalTabState extends State<TerminalTab>
 
   Widget _toolbarToggle(String label, bool active, VoidCallback onPressed) {
     return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 1),
+      child: SizedBox(
+        height: 32,
         child: MaterialButton(
           minWidth: 0,
           height: 32,
           padding: EdgeInsets.zero,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: const RoundedRectangleBorder(),
           color: active ? Colors.blueGrey : const Color(0xFF2D2D2D),
+          elevation: 0,
           onPressed: onPressed,
           child: Text(
             label,
@@ -449,34 +455,51 @@ class TerminalTabState extends State<TerminalTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return Stack(
-      children: [
-        Column(
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardHeight = mediaQuery.viewInsets.bottom;
+    final keyboardOpen = keyboardHeight > 0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final toolbarHeight = keyboardOpen ? _toolbarHeight : 0.0;
+        final terminalHeight = constraints.maxHeight - toolbarHeight;
+        return Stack(
+          clipBehavior: Clip.none,
           children: [
-            Expanded(
-              child: TerminalView(
-                _terminal,
-                autofocus: true,
-                onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: keyboardHeight,
+              height: terminalHeight + toolbarHeight,
+              child: Column(
+                children: [
+                  SizedBox(
+                    height: terminalHeight,
+                    child: TerminalView(
+                      _terminal,
+                      autofocus: true,
+                      onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
+                    ),
+                  ),
+                  if (keyboardOpen) _buildToolbar(),
+                ],
               ),
             ),
-            _buildToolbar(),
+            if (_authFailed)
+              Positioned(
+                bottom: keyboardHeight + 16,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry'),
+                    onPressed: retry,
+                  ),
+                ),
+              ),
           ],
-        ),
-        if (_authFailed)
-          Positioned(
-            bottom: 16,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: FilledButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-                onPressed: retry,
-              ),
-            ),
-          ),
-      ],
+        );
+      },
     );
   }
 }

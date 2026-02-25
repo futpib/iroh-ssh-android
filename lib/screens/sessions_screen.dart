@@ -189,6 +189,7 @@ class _SessionsScreenState extends State<SessionsScreen>
         }
       },
       child: Scaffold(
+        resizeToAvoidBottomInset: false,
         appBar: AppBar(
           title: Text(currentSession.displayName),
           actions: [
