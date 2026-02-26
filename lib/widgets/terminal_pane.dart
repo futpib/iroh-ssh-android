@@ -32,6 +32,9 @@ class TerminalPaneState extends State<TerminalPane> {
   double? _terminalHeight;
   late double _currentFontSize;
   double _baseScaleFontSize = 0;
+  bool _isScaling = false;
+  bool _wasKeyboardOpenBeforeScale = false;
+  final _activePointers = <int>{};
 
   void requestFocus() {
     _focusNode.requestFocus();
@@ -261,11 +264,42 @@ class TerminalPaneState extends State<TerminalPane> {
                       context: context,
                       removeTop: true,
                       removeBottom: true,
-                      child: GestureDetector(
+                      child: Listener(
+                        onPointerDown: (event) {
+                          _activePointers.add(event.pointer);
+                          if (_activePointers.length >= 2 && !_isScaling) {
+                            _isScaling = true;
+                            _wasKeyboardOpenBeforeScale = keyboardOpen;
+                            _focusNode.unfocus();
+                            _focusNode.canRequestFocus = false;
+                          }
+                        },
+                        onPointerUp: (event) {
+                          _activePointers.remove(event.pointer);
+                          if (_activePointers.isEmpty && _isScaling) {
+                            _focusNode.canRequestFocus = true;
+                            if (_wasKeyboardOpenBeforeScale) {
+                              _focusNode.requestFocus();
+                            }
+                            _isScaling = false;
+                          }
+                        },
+                        onPointerCancel: (event) {
+                          _activePointers.remove(event.pointer);
+                          if (_activePointers.isEmpty && _isScaling) {
+                            _focusNode.canRequestFocus = true;
+                            if (_wasKeyboardOpenBeforeScale) {
+                              _focusNode.requestFocus();
+                            }
+                            _isScaling = false;
+                          }
+                        },
+                        child: GestureDetector(
                         onScaleStart: (_) {
                           _baseScaleFontSize = _currentFontSize;
                         },
                         onScaleUpdate: (details) {
+                          if (details.pointerCount < 2) return;
                           final newSize = (_baseScaleFontSize * details.scale)
                               .clamp(8.0, 24.0)
                               .roundToDouble();
@@ -283,6 +317,7 @@ class TerminalPaneState extends State<TerminalPane> {
                           textStyle:
                               TerminalStyle(fontSize: _currentFontSize),
                         ),
+                      ),
                       ),
                     ),
                   ),

@@ -222,4 +222,74 @@ void main() {
 
     expect(_terminalFontSize(tester), 18.0);
   });
+
+  testWidgets('pinch-to-zoom unfocuses terminal to prevent keyboard opening',
+      (tester) async {
+    final terminal = Terminal(maxLines: 100);
+    final focusNode = FocusNode();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 600,
+            child: TerminalPane(
+              terminal: terminal,
+              fontSize: 14.0,
+              focusNode: focusNode,
+              autofocus: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Terminal should have focus initially (autofocus)
+    expect(focusNode.hasFocus, isTrue);
+
+    // Perform a pinch gesture — during scaling the focus node should be
+    // unfocused to prevent the keyboard from appearing.
+    final center = tester.getCenter(find.byType(TerminalView));
+    final offset = const Offset(50, 0);
+    final start1 = center - offset;
+    final start2 = center + offset;
+    final end1 = center - offset * 1.5;
+    final end2 = center + offset * 1.5;
+
+    final gesture1 = await tester.startGesture(start1);
+    await tester.pump();
+    final gesture2 = await tester.startGesture(start2);
+    await tester.pump();
+
+    // After second pointer arrives, focus should be lost immediately
+    expect(focusNode.hasFocus, isFalse,
+        reason: 'Terminal should lose focus when second pointer arrives');
+
+    // Move fingers apart to scale
+    for (var i = 1; i <= 10; i++) {
+      final t = i / 20;
+      await gesture1.moveTo(Offset.lerp(start1, end1, t)!);
+      await gesture2.moveTo(Offset.lerp(start2, end2, t)!);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    // Focus should still be lost during the pinch gesture
+    expect(focusNode.hasFocus, isFalse,
+        reason: 'Terminal should remain unfocused during pinch');
+
+    // Complete the gesture
+    for (var i = 11; i <= 20; i++) {
+      final t = i / 20;
+      await gesture1.moveTo(Offset.lerp(start1, end1, t)!);
+      await gesture2.moveTo(Offset.lerp(start2, end2, t)!);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture1.up();
+    await gesture2.up();
+    await tester.pump();
+
+    focusNode.dispose();
+  });
 }
