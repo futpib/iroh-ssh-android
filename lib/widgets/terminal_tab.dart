@@ -5,20 +5,23 @@ import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
+import 'package:iroh_ssh_app/widgets/terminal_pane.dart';
 import 'package:xterm/xterm.dart';
 
 class TerminalTab extends StatefulWidget {
   final SshSessionInfo session;
   final VoidCallback onDisconnected;
 
+  @visibleForTesting
+  final bool connectOnInit;
+
   const TerminalTab({
     super.key,
     required this.session,
     required this.onDisconnected,
+    this.connectOnInit = true,
   });
 
   @override
@@ -28,15 +31,11 @@ class TerminalTab extends StatefulWidget {
 class TerminalTabState extends State<TerminalTab>
     with AutomaticKeepAliveClientMixin {
   final _terminal = Terminal(maxLines: 10000);
-  final _focusNode = FocusNode();
+  final _paneKey = GlobalKey<TerminalPaneState>();
   SSHClient? _client;
   SSHSession? _session;
   bool _connected = false;
   bool _authFailed = false;
-  bool _ctrlActive = false;
-  bool _altActive = false;
-  double? _terminalHeight;
-  bool _keyboardOpen = false;
 
   Completer<String>? _inputCompleter;
   StringBuffer _inputBuffer = StringBuffer();
@@ -49,16 +48,10 @@ class TerminalTabState extends State<TerminalTab>
   final _stderrBuffer = BytesBuilder(copy: false);
   Timer? _stderrFlushTimer;
 
-  // Keypress-to-frame latency tracking (debug only)
-  Stopwatch? _keypressSw;
-  String? _keypressData;
-  String? _keypressLabel;
-  bool _framePending = false;
-
   bool get connected => _connected;
 
   void requestFocus() {
-    _focusNode.requestFocus();
+    _paneKey.currentState?.requestFocus();
   }
 
   @override
@@ -67,12 +60,11 @@ class TerminalTabState extends State<TerminalTab>
   @override
   void initState() {
     super.initState();
-    if (kDebugMode) {
-      SchedulerBinding.instance.addTimingsCallback(_onFrameTimings);
+    if (widget.connectOnInit) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _connectSsh();
+      });
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _connectSsh();
-    });
   }
 
   Future<String> _readLineFromTerminal({bool echo = true}) {
@@ -107,47 +99,15 @@ class TerminalTabState extends State<TerminalTab>
       return;
     }
 
-    if (_ctrlActive || _altActive) {
-      final modified = _applyModifiers(data);
-      if (_ctrlActive) setState(() => _ctrlActive = false);
-      if (_altActive) setState(() => _altActive = false);
-      if (kDebugMode) {
-        _keypressData = modified;
-        final onOutputMs = _keypressSw?.elapsedMilliseconds;
-        debugPrint(
-            '[ssh-perf][input] keyEvent→onOutput: ${onOutputMs ?? '?'}ms');
-      }
+    final paneState = _paneKey.currentState;
+    if (paneState != null && (paneState.ctrlActive || paneState.altActive)) {
+      final modified = paneState.applyModifiers(data);
+      paneState.clearModifiers();
       _session?.write(utf8.encode(modified));
       return;
     }
 
-    if (kDebugMode) {
-      _keypressData = data;
-      final onOutputMs = _keypressSw?.elapsedMilliseconds;
-      debugPrint(
-          '[ssh-perf][input] keyEvent→onOutput: ${onOutputMs ?? '?'}ms');
-    }
     _session?.write(utf8.encode(data));
-  }
-
-  void _onFrameTimings(List<FrameTiming> timings) {
-    for (final t in timings) {
-      final buildMs = t.buildDuration.inMilliseconds;
-      final rasterMs = t.rasterDuration.inMilliseconds;
-      final totalMs = t.totalSpan.inMilliseconds;
-      if (totalMs > 4) {
-        debugPrint(
-            '[ssh-perf][frame] build: ${buildMs}ms, raster: ${rasterMs}ms, total: ${totalMs}ms');
-      }
-    }
-  }
-
-  KeyEventResult _onKeyEventPerf(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent || event is KeyRepeatEvent) {
-      _keypressSw = Stopwatch()..start();
-      _keypressLabel = event.logicalKey.keyLabel;
-    }
-    return KeyEventResult.ignored;
   }
 
   int _stdoutBatchCount = 0;
@@ -164,9 +124,6 @@ class TerminalTabState extends State<TerminalTab>
           '[ssh-perf][batch] stdout flush #$_stdoutBatchCount: ${bytes.length} bytes ($packets packets)');
     }
     _terminal.write(utf8.decode(bytes, allowMalformed: true));
-    if (kDebugMode) {
-      _scheduleFrameLatencyLog('stdout', bytes.length);
-    }
   }
 
   int _stderrBatchCount = 0;
@@ -183,37 +140,6 @@ class TerminalTabState extends State<TerminalTab>
           '[ssh-perf][batch] stderr flush #$_stderrBatchCount: ${bytes.length} bytes ($packets packets)');
     }
     _terminal.write(utf8.decode(bytes, allowMalformed: true));
-    if (kDebugMode) {
-      _scheduleFrameLatencyLog('stderr', bytes.length);
-    }
-  }
-
-  void _scheduleFrameLatencyLog(String channel, int bytes) {
-    if (!kDebugMode || _framePending) return;
-    final sw = _keypressSw;
-    final input = _keypressData;
-    final label = _keypressLabel;
-    final recvMs = sw?.elapsedMilliseconds;
-    _framePending = true;
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      _framePending = false;
-      final frameMs = sw?.elapsedMilliseconds;
-      if (sw != null && input != null) {
-        final escaped = input.codeUnits
-            .map((c) => c >= 0x20 && c < 0x7f
-                ? String.fromCharCode(c)
-                : '\\x${c.toRadixString(16).padLeft(2, '0')}')
-            .join();
-        debugPrint(
-            '[ssh-perf][$channel] keyEvent→recv: ${recvMs}ms, keyEvent→frame: ${frameMs}ms, key: ${label ?? '?'}, output: "$escaped" ($bytes bytes)');
-        _keypressSw = null;
-        _keypressData = null;
-        _keypressLabel = null;
-      } else {
-        debugPrint(
-            '[ssh-perf][$channel] recv→frame (unsolicited, $bytes bytes)');
-      }
-    });
   }
 
   Future<void> _connectSsh() async {
@@ -289,9 +215,7 @@ class TerminalTabState extends State<TerminalTab>
       });
 
       _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
-        if (!_keyboardOpen) {
-          _session?.resizeTerminal(width, height);
-        }
+        _session?.resizeTerminal(width, height);
       };
 
       _session!.done.then((_) {
@@ -335,131 +259,12 @@ class TerminalTabState extends State<TerminalTab>
   void dispose() {
     _stdoutFlushTimer?.cancel();
     _stderrFlushTimer?.cancel();
-    if (kDebugMode) {
-      SchedulerBinding.instance.removeTimingsCallback(_onFrameTimings);
-    }
-    _focusNode.dispose();
     _session?.close();
     _client?.close();
-    disconnectIroh(port: widget.session.port);
-    super.dispose();
-  }
-
-  String _applyModifiers(String data) {
-    final buf = StringBuffer();
-    for (final char in data.codeUnits) {
-      if (_ctrlActive && char >= 0x61 && char <= 0x7a) {
-        // a-z → Ctrl+letter (0x01-0x1a)
-        buf.writeCharCode(char - 0x60);
-      } else if (_ctrlActive && char >= 0x41 && char <= 0x5a) {
-        // A-Z → Ctrl+letter (0x01-0x1a)
-        buf.writeCharCode(char - 0x40);
-      } else if (_altActive) {
-        // Alt sends ESC prefix
-        buf.writeCharCode(0x1b);
-        buf.writeCharCode(char);
-      } else {
-        buf.writeCharCode(char);
-      }
+    if (widget.connectOnInit) {
+      disconnectIroh(port: widget.session.port);
     }
-    return buf.toString();
-  }
-
-  void _sendKey(TerminalKey key) {
-    _terminal.keyInput(key, ctrl: _ctrlActive, alt: _altActive);
-    if (_ctrlActive) setState(() => _ctrlActive = false);
-    if (_altActive) setState(() => _altActive = false);
-  }
-
-  static const double _toolbarHeight = 64;
-
-  void _sendChar(String char) {
-    _terminal.textInput(char);
-  }
-
-  Widget _buildToolbar() {
-    return Container(
-      color: const Color(0xFF1E1E1E),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              _toolbarButton('ESC', () => _sendKey(TerminalKey.escape)),
-              _toolbarButton('/', () => _sendChar('/')),
-              _toolbarButton('-', () => _sendChar('-')),
-              _toolbarButton('HOME', () => _sendKey(TerminalKey.home)),
-              _toolbarButton('↑', () => _sendKey(TerminalKey.arrowUp)),
-              _toolbarButton('END', () => _sendKey(TerminalKey.end)),
-              _toolbarButton('PGUP', () => _sendKey(TerminalKey.pageUp)),
-            ],
-          ),
-          Row(
-            children: [
-              _toolbarButton('TAB', () => _sendKey(TerminalKey.tab)),
-              _toolbarToggle('CTRL', _ctrlActive, () {
-                setState(() => _ctrlActive = !_ctrlActive);
-              }),
-              _toolbarToggle('ALT', _altActive, () {
-                setState(() => _altActive = !_altActive);
-              }),
-              _toolbarButton('←', () => _sendKey(TerminalKey.arrowLeft)),
-              _toolbarButton('↓', () => _sendKey(TerminalKey.arrowDown)),
-              _toolbarButton('→', () => _sendKey(TerminalKey.arrowRight)),
-              _toolbarButton('PGDN', () => _sendKey(TerminalKey.pageDown)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _toolbarButton(String label, VoidCallback onPressed) {
-    return Expanded(
-      child: SizedBox(
-        height: 32,
-        child: MaterialButton(
-          minWidth: 0,
-          height: 32,
-          padding: EdgeInsets.zero,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: const RoundedRectangleBorder(),
-          color: const Color(0xFF2D2D2D),
-          elevation: 0,
-          onPressed: onPressed,
-          child: Text(
-            label,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _toolbarToggle(String label, bool active, VoidCallback onPressed) {
-    return Expanded(
-      child: SizedBox(
-        height: 32,
-        child: MaterialButton(
-          minWidth: 0,
-          height: 32,
-          padding: EdgeInsets.zero,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: const RoundedRectangleBorder(),
-          color: active ? Colors.blueGrey : const Color(0xFF2D2D2D),
-          elevation: 0,
-          onPressed: onPressed,
-          child: Text(
-            label,
-            style: TextStyle(
-              color: active ? Colors.white : Colors.white70,
-              fontSize: 12,
-              fontWeight: active ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ),
-      ),
-    );
+    super.dispose();
   }
 
   @override
@@ -467,71 +272,27 @@ class TerminalTabState extends State<TerminalTab>
     super.build(context);
     final mediaQuery = MediaQuery.of(context);
     final keyboardHeight = mediaQuery.viewInsets.bottom;
-    final keyboardOpen = keyboardHeight > 0;
-    _keyboardOpen = keyboardOpen;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final toolbarHeight = keyboardOpen ? _toolbarHeight : 0.0;
-        if (!keyboardOpen) {
-          _terminalHeight = constraints.maxHeight;
-        }
-        final terminalHeight = _terminalHeight ?? constraints.maxHeight - toolbarHeight;
-        if (kDebugMode) {
-          debugPrint(
-              '[layout] keyboardOpen=$keyboardOpen, '
-              'keyboardHeight=$keyboardHeight, '
-              'constraints=${constraints.maxHeight}, '
-              '_terminalHeight=$_terminalHeight, '
-              'terminalHeight=$terminalHeight, '
-              'toolbarHeight=$toolbarHeight, '
-              'total=${terminalHeight + toolbarHeight}, '
-              'viewWidth=${_terminal.viewWidth}, '
-              'viewHeight=${_terminal.viewHeight}');
-        }
-        final slideUp = keyboardOpen
-            ? keyboardHeight + toolbarHeight - (constraints.maxHeight - terminalHeight)
-            : 0.0;
-        return Stack(
-          children: [
-            Transform.translate(
-              offset: Offset(0, -slideUp),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    height: terminalHeight,
-                    child: MediaQuery.removePadding(
-                      context: context,
-                      removeTop: true,
-                      removeBottom: true,
-                      child: TerminalView(
-                        _terminal,
-                        focusNode: _focusNode,
-                        autofocus: true,
-                        onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
-                      ),
-                    ),
-                  ),
-                  if (keyboardOpen) _buildToolbar(),
-                ],
+    return Stack(
+      children: [
+        TerminalPane(
+          key: _paneKey,
+          terminal: _terminal,
+          autofocus: true,
+        ),
+        if (_authFailed)
+          Positioned(
+            bottom: keyboardHeight + 16,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: FilledButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+                onPressed: retry,
               ),
             ),
-            if (_authFailed)
-              Positioned(
-                bottom: keyboardHeight + 16,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: FilledButton.icon(
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Retry'),
-                    onPressed: retry,
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
+          ),
+      ],
     );
   }
 }
