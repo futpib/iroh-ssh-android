@@ -40,6 +40,7 @@ class TerminalTabState extends State<TerminalTab>
   SSHSession? _session;
   bool _connected = false;
   bool _authFailed = false;
+  late double _fontSize;
 
   Completer<String>? _inputCompleter;
   StringBuffer _inputBuffer = StringBuffer();
@@ -72,10 +73,19 @@ class TerminalTabState extends State<TerminalTab>
   @override
   void initState() {
     super.initState();
+    _fontSize = widget.fontSize;
     if (widget.connectOnInit) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _connectSsh();
       });
+    }
+  }
+
+  @override
+  void didUpdateWidget(TerminalTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.fontSize != oldWidget.fontSize) {
+      _fontSize = widget.fontSize;
     }
   }
 
@@ -290,10 +300,13 @@ class TerminalTabState extends State<TerminalTab>
           key: _paneKey,
           terminal: _terminal,
           autofocus: true,
-          fontSize: widget.fontSize,
+          fontSize: _fontSize,
           theme: widget.themeName == 'whiteOnBlack'
               ? TerminalThemes.whiteOnBlack
               : TerminalThemes.defaultTheme,
+          onFontSizeChanged: (newSize) {
+            setState(() => _fontSize = newSize);
+          },
         ),
         if (_authFailed)
           Positioned(

@@ -9,6 +9,7 @@ class TerminalPane extends StatefulWidget {
   final bool autofocus;
   final double fontSize;
   final TerminalTheme theme;
+  final ValueChanged<double>? onFontSizeChanged;
 
   const TerminalPane({
     super.key,
@@ -17,6 +18,7 @@ class TerminalPane extends StatefulWidget {
     this.autofocus = false,
     this.fontSize = 14.0,
     this.theme = TerminalThemes.defaultTheme,
+    this.onFontSizeChanged,
   });
 
   @override
@@ -28,6 +30,8 @@ class TerminalPaneState extends State<TerminalPane> {
   bool _ctrlActive = false;
   bool _altActive = false;
   double? _terminalHeight;
+  late double _currentFontSize;
+  double _baseScaleFontSize = 0;
 
   void requestFocus() {
     _focusNode.requestFocus();
@@ -45,6 +49,7 @@ class TerminalPaneState extends State<TerminalPane> {
   @override
   void initState() {
     super.initState();
+    _currentFontSize = widget.fontSize;
     _focusNode = widget.focusNode ?? FocusNode();
     if (kDebugMode) {
       SchedulerBinding.instance.addTimingsCallback(_onFrameTimings);
@@ -59,6 +64,9 @@ class TerminalPaneState extends State<TerminalPane> {
         _focusNode.dispose();
       }
       _focusNode = widget.focusNode ?? FocusNode();
+    }
+    if (widget.fontSize != oldWidget.fontSize) {
+      _currentFontSize = widget.fontSize;
     }
   }
 
@@ -253,13 +261,28 @@ class TerminalPaneState extends State<TerminalPane> {
                       context: context,
                       removeTop: true,
                       removeBottom: true,
-                      child: TerminalView(
-                        widget.terminal,
-                        focusNode: _focusNode,
-                        autofocus: widget.autofocus,
-                        onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
-                        theme: widget.theme,
-                        textStyle: TerminalStyle(fontSize: widget.fontSize),
+                      child: GestureDetector(
+                        onScaleStart: (_) {
+                          _baseScaleFontSize = _currentFontSize;
+                        },
+                        onScaleUpdate: (details) {
+                          final newSize = (_baseScaleFontSize * details.scale)
+                              .clamp(8.0, 24.0)
+                              .roundToDouble();
+                          if (newSize != _currentFontSize) {
+                            setState(() => _currentFontSize = newSize);
+                            widget.onFontSizeChanged?.call(newSize);
+                          }
+                        },
+                        child: TerminalView(
+                          widget.terminal,
+                          focusNode: _focusNode,
+                          autofocus: widget.autofocus,
+                          onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
+                          theme: widget.theme,
+                          textStyle:
+                              TerminalStyle(fontSize: _currentFontSize),
+                        ),
                       ),
                     ),
                   ),
