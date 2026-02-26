@@ -28,6 +28,8 @@ class TerminalPaneState extends State<TerminalPane> {
   bool _ctrlActive = false;
   bool _altActive = false;
   double? _terminalHeight;
+  int? _savedViewWidth;
+  int? _savedViewHeight;
   late double _currentFontSize;
   double _baseScaleFontSize = 0;
   bool _isScaling = false;
@@ -208,87 +210,78 @@ class TerminalPaneState extends State<TerminalPane> {
         final toolbarHeight = keyboardOpen ? _toolbarHeight : 0.0;
         if (!keyboardOpen) {
           _terminalHeight = constraints.maxHeight;
+          _savedViewWidth = widget.terminal.viewWidth;
+          _savedViewHeight = widget.terminal.viewHeight;
         }
-        final terminalHeight =
-            _terminalHeight ?? constraints.maxHeight - toolbarHeight;
-        final slideUp = keyboardOpen
-            ? keyboardHeight +
-                toolbarHeight -
-                (constraints.maxHeight - terminalHeight)
-            : 0.0;
-        return Stack(
+        final terminalHeight = keyboardOpen
+            ? constraints.maxHeight - keyboardHeight - toolbarHeight
+            : (_terminalHeight ?? constraints.maxHeight);
+        return Column(
           children: [
-            Transform.translate(
-              offset: Offset(0, -slideUp),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    height: terminalHeight,
-                    child: MediaQuery.removePadding(
-                      context: context,
-                      removeTop: true,
-                      removeBottom: true,
-                      child: Listener(
-                        onPointerDown: (event) {
-                          _activePointers.add(event.pointer);
-                          if (_activePointers.length >= 2 && !_isScaling) {
-                            _isScaling = true;
-                            _wasKeyboardOpenBeforeScale = keyboardOpen;
-                            _focusNode.unfocus();
-                            _focusNode.canRequestFocus = false;
-                          }
-                        },
-                        onPointerUp: (event) {
-                          _activePointers.remove(event.pointer);
-                          if (_activePointers.isEmpty && _isScaling) {
-                            _focusNode.canRequestFocus = true;
-                            if (_wasKeyboardOpenBeforeScale) {
-                              _focusNode.requestFocus();
-                            }
-                            _isScaling = false;
-                          }
-                        },
-                        onPointerCancel: (event) {
-                          _activePointers.remove(event.pointer);
-                          if (_activePointers.isEmpty && _isScaling) {
-                            _focusNode.canRequestFocus = true;
-                            if (_wasKeyboardOpenBeforeScale) {
-                              _focusNode.requestFocus();
-                            }
-                            _isScaling = false;
-                          }
-                        },
-                        child: GestureDetector(
-                        onScaleStart: (_) {
-                          _baseScaleFontSize = _currentFontSize;
-                        },
-                        onScaleUpdate: (details) {
-                          if (details.pointerCount < 2) return;
-                          final newSize = (_baseScaleFontSize * details.scale)
-                              .clamp(8.0, 24.0)
-                              .roundToDouble();
-                          if (newSize != _currentFontSize) {
-                            setState(() => _currentFontSize = newSize);
-                            widget.onFontSizeChanged?.call(newSize);
-                          }
-                        },
-                        child: TerminalView(
-                          widget.terminal,
-                          focusNode: _focusNode,
-                          autofocus: widget.autofocus,
-                          theme: widget.theme,
-                          textStyle:
-                              TerminalStyle(fontSize: _currentFontSize),
-                        ),
-                      ),
-                      ),
+            SizedBox(
+              height: terminalHeight,
+              child: MediaQuery.removePadding(
+                context: context,
+                removeTop: true,
+                removeBottom: true,
+                child: Listener(
+                  onPointerDown: (event) {
+                    _activePointers.add(event.pointer);
+                    if (_activePointers.length >= 2 && !_isScaling) {
+                      _isScaling = true;
+                      _wasKeyboardOpenBeforeScale = keyboardOpen;
+                      _focusNode.unfocus();
+                      _focusNode.canRequestFocus = false;
+                    }
+                  },
+                  onPointerUp: (event) {
+                    _activePointers.remove(event.pointer);
+                    if (_activePointers.isEmpty && _isScaling) {
+                      _focusNode.canRequestFocus = true;
+                      if (_wasKeyboardOpenBeforeScale) {
+                        _focusNode.requestFocus();
+                      }
+                      _isScaling = false;
+                    }
+                  },
+                  onPointerCancel: (event) {
+                    _activePointers.remove(event.pointer);
+                    if (_activePointers.isEmpty && _isScaling) {
+                      _focusNode.canRequestFocus = true;
+                      if (_wasKeyboardOpenBeforeScale) {
+                        _focusNode.requestFocus();
+                      }
+                      _isScaling = false;
+                    }
+                  },
+                  child: GestureDetector(
+                    onScaleStart: (_) {
+                      _baseScaleFontSize = _currentFontSize;
+                    },
+                    onScaleUpdate: (details) {
+                      if (details.pointerCount < 2) return;
+                      final newSize = (_baseScaleFontSize * details.scale)
+                          .clamp(8.0, 24.0)
+                          .roundToDouble();
+                      if (newSize != _currentFontSize) {
+                        setState(() => _currentFontSize = newSize);
+                        widget.onFontSizeChanged?.call(newSize);
+                      }
+                    },
+                    child: TerminalView(
+                      widget.terminal,
+                      focusNode: _focusNode,
+                      autofocus: widget.autofocus,
+                      autoResize: !keyboardOpen,
+                      theme: widget.theme,
+                      textStyle:
+                          TerminalStyle(fontSize: _currentFontSize),
                     ),
                   ),
-                  if (keyboardOpen) _buildToolbar(),
-                ],
+                ),
               ),
             ),
+            if (keyboardOpen) _buildToolbar(),
           ],
         );
       },
