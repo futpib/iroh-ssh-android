@@ -30,10 +30,14 @@ class _SettingsScreenState extends State<SettingsScreen>
   int? _maxRemoteNatTraversalAddresses;
   bool _relaysLoading = true;
 
+  double _terminalFontSize = 14.0;
+  String _terminalTheme = 'default';
+  bool _terminalLoading = true;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _loadKeys();
     _loadSettings();
   }
@@ -339,6 +343,9 @@ class _SettingsScreenState extends State<SettingsScreen>
         _customRelayUrls = List.of(settings.customRelayUrls);
         _maxRemoteNatTraversalAddresses = settings.maxRemoteNatTraversalAddresses;
         _relaysLoading = false;
+        _terminalFontSize = settings.terminalFontSize;
+        _terminalTheme = settings.terminalTheme;
+        _terminalLoading = false;
       });
     }
   }
@@ -348,6 +355,18 @@ class _SettingsScreenState extends State<SettingsScreen>
       useDefaultRelays: _useDefaultRelays,
       customRelayUrls: _customRelayUrls,
       maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
+      terminalFontSize: _terminalFontSize,
+      terminalTheme: _terminalTheme,
+    ));
+  }
+
+  Future<void> _saveTerminalSettings() async {
+    await SettingsStorage.instance.save(AppSettings(
+      useDefaultRelays: _useDefaultRelays,
+      customRelayUrls: _customRelayUrls,
+      maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
+      terminalFontSize: _terminalFontSize,
+      terminalTheme: _terminalTheme,
     ));
   }
 
@@ -413,6 +432,60 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
 
+  Widget _buildTerminalTab() {
+    if (_terminalLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Font Size: ${_terminalFontSize.round()}',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          Slider(
+            value: _terminalFontSize,
+            min: 8,
+            max: 24,
+            divisions: 16,
+            label: _terminalFontSize.round().toString(),
+            onChanged: (value) {
+              setState(() => _terminalFontSize = value.roundToDouble());
+              _saveTerminalSettings();
+            },
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Theme',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          RadioGroup<String>(
+            groupValue: _terminalTheme,
+            onChanged: (value) {
+              setState(() => _terminalTheme = value!);
+              _saveTerminalSettings();
+            },
+            child: Column(
+              children: [
+                RadioListTile<String>(
+                  title: const Text('Default'),
+                  value: 'default',
+                ),
+                RadioListTile<String>(
+                  title: const Text('White on Black'),
+                  value: 'whiteOnBlack',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -423,6 +496,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           tabs: const [
             Tab(text: 'Keys'),
             Tab(text: 'Network'),
+            Tab(text: 'Terminal'),
           ],
         ),
       ),
@@ -431,6 +505,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         children: [
           _buildKeysTab(),
           _buildRelaysTab(),
+          _buildTerminalTab(),
         ],
       ),
       floatingActionButton: ListenableBuilder(
