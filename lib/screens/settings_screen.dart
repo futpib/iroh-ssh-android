@@ -6,6 +6,7 @@ import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/widgets/relay_url_list_editor.dart';
@@ -276,19 +277,38 @@ class _SettingsScreenState extends State<SettingsScreen>
           decoration: InputDecoration(
             hintText: '-----BEGIN OPENSSH PRIVATE KEY-----\n...',
             border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              icon: const Icon(Icons.file_open),
-              tooltip: 'Pick file',
-              onPressed: () async {
-                final result = await FilePicker.platform.pickFiles(
-                  type: FileType.any,
-                  withData: true,
-                );
-                if (result != null && result.files.single.bytes != null) {
-                  controller.text =
-                      utf8.decode(result.files.single.bytes!);
-                }
-              },
+            suffixIcon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.qr_code_scanner),
+                  tooltip: 'Scan QR code',
+                  onPressed: () async {
+                    final result = await Navigator.of(ctx).push<String>(
+                      MaterialPageRoute(
+                        builder: (_) => const QrScannerScreen(),
+                      ),
+                    );
+                    if (result != null) {
+                      controller.text = result;
+                    }
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.file_open),
+                  tooltip: 'Pick file',
+                  onPressed: () async {
+                    final result = await FilePicker.platform.pickFiles(
+                      type: FileType.any,
+                      withData: true,
+                    );
+                    if (result != null && result.files.single.bytes != null) {
+                      controller.text =
+                          utf8.decode(result.files.single.bytes!);
+                    }
+                  },
+                ),
+              ],
             ),
           ),
           maxLines: 8,
