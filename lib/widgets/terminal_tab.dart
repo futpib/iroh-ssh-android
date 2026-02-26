@@ -28,6 +28,7 @@ class TerminalTab extends StatefulWidget {
 class TerminalTabState extends State<TerminalTab>
     with AutomaticKeepAliveClientMixin {
   final _terminal = Terminal(maxLines: 10000);
+  final _focusNode = FocusNode();
   SSHClient? _client;
   SSHSession? _session;
   bool _connected = false;
@@ -55,6 +56,10 @@ class TerminalTabState extends State<TerminalTab>
   bool _framePending = false;
 
   bool get connected => _connected;
+
+  void requestFocus() {
+    _focusNode.requestFocus();
+  }
 
   @override
   bool get wantKeepAlive => true;
@@ -333,6 +338,7 @@ class TerminalTabState extends State<TerminalTab>
     if (kDebugMode) {
       SchedulerBinding.instance.removeTimingsCallback(_onFrameTimings);
     }
+    _focusNode.dispose();
     _session?.close();
     _client?.close();
     disconnectIroh(port: widget.session.port);
@@ -500,6 +506,7 @@ class TerminalTabState extends State<TerminalTab>
                       removeBottom: true,
                       child: TerminalView(
                         _terminal,
+                        focusNode: _focusNode,
                         autofocus: true,
                         onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
                       ),

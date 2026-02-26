@@ -86,6 +86,8 @@ class _SessionsScreenState extends State<SessionsScreen>
 
   void _onTabChanged() {
     if (!_tabController.indexIsChanging) {
+      final session = _sessions[_tabController.index];
+      _tabKeys[session.port]?.currentState?.requestFocus();
       setState(() {});
     }
   }
