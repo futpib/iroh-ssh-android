@@ -1,6 +1,4 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:xterm/xterm.dart';
 
 class TerminalPane extends StatefulWidget {
@@ -54,9 +52,6 @@ class TerminalPaneState extends State<TerminalPane> {
     super.initState();
     _currentFontSize = widget.fontSize;
     _focusNode = widget.focusNode ?? FocusNode();
-    if (kDebugMode) {
-      SchedulerBinding.instance.addTimingsCallback(_onFrameTimings);
-    }
   }
 
   @override
@@ -75,29 +70,10 @@ class TerminalPaneState extends State<TerminalPane> {
 
   @override
   void dispose() {
-    if (kDebugMode) {
-      SchedulerBinding.instance.removeTimingsCallback(_onFrameTimings);
-    }
     if (widget.focusNode == null) {
       _focusNode.dispose();
     }
     super.dispose();
-  }
-
-  void _onFrameTimings(List<FrameTiming> timings) {
-    for (final t in timings) {
-      final buildMs = t.buildDuration.inMilliseconds;
-      final rasterMs = t.rasterDuration.inMilliseconds;
-      final totalMs = t.totalSpan.inMilliseconds;
-      if (totalMs > 4) {
-        debugPrint(
-            '[ssh-perf][frame] build: ${buildMs}ms, raster: ${rasterMs}ms, total: ${totalMs}ms');
-      }
-    }
-  }
-
-  KeyEventResult _onKeyEventPerf(FocusNode node, KeyEvent event) {
-    return KeyEventResult.ignored;
   }
 
   String applyModifiers(String data) {
@@ -235,17 +211,6 @@ class TerminalPaneState extends State<TerminalPane> {
         }
         final terminalHeight =
             _terminalHeight ?? constraints.maxHeight - toolbarHeight;
-        if (kDebugMode) {
-          debugPrint('[layout] keyboardOpen=$keyboardOpen, '
-              'keyboardHeight=$keyboardHeight, '
-              'constraints=${constraints.maxHeight}, '
-              '_terminalHeight=$_terminalHeight, '
-              'terminalHeight=$terminalHeight, '
-              'toolbarHeight=$toolbarHeight, '
-              'total=${terminalHeight + toolbarHeight}, '
-              'viewWidth=${widget.terminal.viewWidth}, '
-              'viewHeight=${widget.terminal.viewHeight}');
-        }
         final slideUp = keyboardOpen
             ? keyboardHeight +
                 toolbarHeight -
@@ -312,7 +277,6 @@ class TerminalPaneState extends State<TerminalPane> {
                           widget.terminal,
                           focusNode: _focusNode,
                           autofocus: widget.autofocus,
-                          onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
                           theme: widget.theme,
                           textStyle:
                               TerminalStyle(fontSize: _currentFontSize),

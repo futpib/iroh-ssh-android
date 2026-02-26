@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
@@ -132,35 +131,15 @@ class TerminalTabState extends State<TerminalTab>
     _session?.write(utf8.encode(data));
   }
 
-  int _stdoutBatchCount = 0;
-  int _stdoutPacketCount = 0;
-
   void _flushStdout() {
     _stdoutFlushTimer = null;
-    final packets = _stdoutPacketCount;
-    _stdoutPacketCount = 0;
     final bytes = _stdoutBuffer.takeBytes();
-    _stdoutBatchCount++;
-    if (kDebugMode) {
-      debugPrint(
-          '[ssh-perf][batch] stdout flush #$_stdoutBatchCount: ${bytes.length} bytes ($packets packets)');
-    }
     _terminal.write(utf8.decode(bytes, allowMalformed: true));
   }
 
-  int _stderrBatchCount = 0;
-  int _stderrPacketCount = 0;
-
   void _flushStderr() {
     _stderrFlushTimer = null;
-    final packets = _stderrPacketCount;
-    _stderrPacketCount = 0;
     final bytes = _stderrBuffer.takeBytes();
-    _stderrBatchCount++;
-    if (kDebugMode) {
-      debugPrint(
-          '[ssh-perf][batch] stderr flush #$_stderrBatchCount: ${bytes.length} bytes ($packets packets)');
-    }
     _terminal.write(utf8.decode(bytes, allowMalformed: true));
   }
 
@@ -171,12 +150,8 @@ class TerminalTabState extends State<TerminalTab>
       _terminal.write(
           'Connecting to ${widget.session.host}:${widget.session.port}...\r\n');
 
-      final connectSw = kDebugMode ? (Stopwatch()..start()) : null;
-
       final socket = await SSHSocket.connect(
           widget.session.host, widget.session.port);
-
-      final socketMs = connectSw?.elapsedMilliseconds;
 
       _client = SSHClient(
         socket,
@@ -206,8 +181,6 @@ class TerminalTabState extends State<TerminalTab>
 
       _terminal.write('Authenticating...\r\n');
 
-      final authMs = connectSw?.elapsedMilliseconds;
-
       _session = await _client!.shell(
         pty: SSHPtyConfig(
           width: _terminal.viewWidth,
@@ -215,24 +188,16 @@ class TerminalTabState extends State<TerminalTab>
         ),
       );
 
-      if (kDebugMode) {
-        final shellMs = connectSw!.elapsedMilliseconds;
-        debugPrint(
-            '[ssh-perf][connect] socket: ${socketMs}ms, auth: ${authMs! - socketMs!}ms, shell: ${shellMs - authMs}ms');
-      }
-
       _terminal.buffer.clear();
       _terminal.buffer.setCursor(0, 0);
 
       _session!.stdout.listen((data) {
         _stdoutBuffer.add(data);
-        _stdoutPacketCount++;
         _stdoutFlushTimer ??= Timer(_batchDuration, _flushStdout);
       });
 
       _session!.stderr.listen((data) {
         _stderrBuffer.add(data);
-        _stderrPacketCount++;
         _stderrFlushTimer ??= Timer(_batchDuration, _flushStderr);
       });
 
