@@ -9,7 +9,7 @@ import 'package:local_auth/local_auth.dart';
 import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
-import 'package:iroh_ssh_app/widgets/relay_url_list_editor.dart';
+import 'package:iroh_ssh_app/widgets/network_settings_editor.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -27,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   bool _useDefaultRelays = true;
   List<String> _customRelayUrls = [];
+  int? _maxRemoteNatTraversalAddresses;
   bool _relaysLoading = true;
 
   @override
@@ -336,6 +337,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       setState(() {
         _useDefaultRelays = settings.useDefaultRelays;
         _customRelayUrls = List.of(settings.customRelayUrls);
+        _maxRemoteNatTraversalAddresses = settings.maxRemoteNatTraversalAddresses;
         _relaysLoading = false;
       });
     }
@@ -345,6 +347,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     await SettingsStorage.instance.save(AppSettings(
       useDefaultRelays: _useDefaultRelays,
       customRelayUrls: _customRelayUrls,
+      maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
     ));
   }
 
@@ -391,32 +394,21 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Use default relays'),
-            subtitle: const Text('Include the built-in relay servers.'),
-            value: _useDefaultRelays,
-            onChanged: (value) {
-              setState(() => _useDefaultRelays = value);
-              _saveRelaySettings();
-            },
-          ),
-          const SizedBox(height: 16),
-          RelayUrlListEditor(
-            label: 'Custom relays',
-            helperText: _useDefaultRelays
-                ? 'Added alongside default relay servers.'
-                : 'Replaces default relay servers.',
-            urls: _customRelayUrls,
-            onChanged: (urls) {
-              setState(() => _customRelayUrls = urls);
-              _saveRelaySettings();
-            },
-          ),
-        ],
+      child: NetworkSettingsEditor(
+        value: NetworkSettings(
+          useDefaultRelays: _useDefaultRelays,
+          customRelayUrls: _customRelayUrls,
+          maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
+        ),
+        onChanged: (settings) {
+          setState(() {
+            _useDefaultRelays = settings.useDefaultRelays;
+            _customRelayUrls = settings.customRelayUrls;
+            _maxRemoteNatTraversalAddresses =
+                settings.maxRemoteNatTraversalAddresses;
+          });
+          _saveRelaySettings();
+        },
       ),
     );
   }
@@ -430,7 +422,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           controller: _tabController,
           tabs: const [
             Tab(text: 'Keys'),
-            Tab(text: 'Relays'),
+            Tab(text: 'Network'),
           ],
         ),
       ),

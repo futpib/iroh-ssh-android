@@ -81,6 +81,7 @@ abstract class RustLibApi extends BaseApi {
     required String endpointId,
     required List<String> relayUrls,
     required List<String> extraRelayUrls,
+    int? maxRemoteNatTraversalAddresses,
   });
 
   Future<BigInt> crateApiSimpleConnectionCount();
@@ -107,6 +108,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String endpointId,
     required List<String> relayUrls,
     required List<String> extraRelayUrls,
+    int? maxRemoteNatTraversalAddresses,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -115,6 +117,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(endpointId, serializer);
           sse_encode_list_String(relayUrls, serializer);
           sse_encode_list_String(extraRelayUrls, serializer);
+          sse_encode_opt_box_autoadd_u_8(maxRemoteNatTraversalAddresses, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -127,7 +130,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiSimpleConnectIrohConstMeta,
-        argValues: [endpointId, relayUrls, extraRelayUrls],
+        argValues: [endpointId, relayUrls, extraRelayUrls, maxRemoteNatTraversalAddresses],
         apiImpl: this,
       ),
     );
@@ -135,7 +138,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiSimpleConnectIrohConstMeta => const TaskConstMeta(
     debugName: "connect_iroh",
-    argNames: ["endpointId", "relayUrls", "extraRelayUrls"],
+    argNames: ["endpointId", "relayUrls", "extraRelayUrls", "maxRemoteNatTraversalAddresses"],
   );
 
   @override
@@ -497,6 +500,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_u_8(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int sse_decode_u_16(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint16();
@@ -615,6 +629,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_f_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_u_8(self, serializer);
     }
   }
 

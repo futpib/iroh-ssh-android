@@ -6,24 +6,31 @@ import 'package:path_provider/path_provider.dart';
 class AppSettings {
   final bool useDefaultRelays;
   final List<String> customRelayUrls;
+  final int? maxRemoteNatTraversalAddresses;
 
   AppSettings({
     this.useDefaultRelays = true,
     this.customRelayUrls = const [],
+    this.maxRemoteNatTraversalAddresses,
   });
 
   Map<String, dynamic> toJson() => {
         'useDefaultRelays': useDefaultRelays,
         'customRelayUrls': customRelayUrls,
+        if (maxRemoteNatTraversalAddresses != null)
+          'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
+    final maxNat = json['maxRemoteNatTraversalAddresses'] as int?;
+
     // Backwards compat: migrate old relayUrls/extraRelayUrls
     if (json.containsKey('useDefaultRelays')) {
       return AppSettings(
         useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
         customRelayUrls:
             (json['customRelayUrls'] as List?)?.cast<String>() ?? [],
+        maxRemoteNatTraversalAddresses: maxNat,
       );
     }
     final oldRelayUrls =
@@ -34,11 +41,13 @@ class AppSettings {
       return AppSettings(
         useDefaultRelays: false,
         customRelayUrls: oldRelayUrls,
+        maxRemoteNatTraversalAddresses: maxNat,
       );
     }
     return AppSettings(
       useDefaultRelays: true,
       customRelayUrls: oldExtraRelayUrls,
+      maxRemoteNatTraversalAddresses: maxNat,
     );
   }
 }

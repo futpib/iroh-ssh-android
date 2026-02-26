@@ -21,8 +21,17 @@ pub async fn connect_iroh(
     endpoint_id: String,
     relay_urls: Vec<String>,
     extra_relay_urls: Vec<String>,
+    max_remote_nat_traversal_addresses: Option<u8>,
 ) -> anyhow::Result<u16> {
-    iroh_ssh::bridge::connect(endpoint_id, relay_urls, extra_relay_urls).await
+    iroh_ssh::bridge::connect(
+        endpoint_id,
+        iroh_ssh::bridge::ConnectOptions {
+            relay_urls,
+            extra_relay_urls,
+            max_remote_nat_traversal_addresses,
+        },
+    )
+    .await
 }
 
 /// Disconnect a connection by its port.

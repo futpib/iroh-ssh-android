@@ -70,6 +70,7 @@ fn wire__crate__api__simple__connect_iroh_impl(
             let api_endpoint_id = <String>::sse_decode(&mut deserializer);
             let api_relay_urls = <Vec<String>>::sse_decode(&mut deserializer);
             let api_extra_relay_urls = <Vec<String>>::sse_decode(&mut deserializer);
+            let api_max_remote_nat_traversal_addresses = <Option<u8>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -78,6 +79,7 @@ fn wire__crate__api__simple__connect_iroh_impl(
                             api_endpoint_id,
                             api_relay_urls,
                             api_extra_relay_urls,
+                            api_max_remote_nat_traversal_addresses,
                         )
                         .await?;
                         Ok(output_ok)
@@ -360,6 +362,17 @@ impl SseDecode for Option<f64> {
     }
 }
 
+impl SseDecode for Option<u8> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<u8>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::simple::IrohConnectionInfo> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -537,6 +550,16 @@ impl SseEncode for Option<f64> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <f64>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<u8> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <u8>::sse_encode(value, serializer);
         }
     }
 }

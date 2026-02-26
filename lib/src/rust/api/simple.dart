@@ -15,10 +15,12 @@ Future<int> connectIroh({
   required String endpointId,
   required List<String> relayUrls,
   required List<String> extraRelayUrls,
+  int? maxRemoteNatTraversalAddresses,
 }) => RustLib.instance.api.crateApiSimpleConnectIroh(
   endpointId: endpointId,
   relayUrls: relayUrls,
   extraRelayUrls: extraRelayUrls,
+  maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
 );
 
 /// Disconnect a connection by its port.

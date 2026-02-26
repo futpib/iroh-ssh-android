@@ -9,7 +9,7 @@ import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/screens/settings_screen.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/screens/sessions_screen.dart';
-import 'package:iroh_ssh_app/widgets/relay_url_list_editor.dart';
+import 'package:iroh_ssh_app/widgets/network_settings_editor.dart';
 
 class ConnectScreen extends StatefulWidget {
   final bool returnResult;
@@ -25,6 +25,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   bool _overrideRelays = false;
   bool _useDefaultRelays = true;
   List<String> _customRelayUrls = [];
+  int? _maxRemoteNatTraversalAddresses;
   bool _connecting = false;
   String? _error;
   List<SavedConnection> _savedConnections = [];
@@ -51,7 +52,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Future<void> _connectTo(String target,
       {bool overrideRelays = false,
       bool useDefaultRelays = true,
-      List<String> customRelayUrls = const []}) async {
+      List<String> customRelayUrls = const [],
+      int? maxRemoteNatTraversalAddresses}) async {
     final String username;
     final String endpointId;
 
@@ -88,10 +90,15 @@ class _ConnectScreenState extends State<ConnectScreen> {
         extraRelayUrls = [];
       }
 
+      final effectiveMaxNat = overrideRelays
+          ? maxRemoteNatTraversalAddresses
+          : globalSettings.maxRemoteNatTraversalAddresses;
+
       final port = await connectIroh(
         endpointId: endpointId,
         relayUrls: relayUrls,
         extraRelayUrls: extraRelayUrls,
+        maxRemoteNatTraversalAddresses: effectiveMaxNat,
       );
 
       await ConnectionStorage.instance.save(SavedConnection(
@@ -99,6 +106,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
         overrideRelays: overrideRelays,
         useDefaultRelays: useDefaultRelays,
         customRelayUrls: customRelayUrls,
+        maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
       ));
       await _loadConnections();
 
@@ -140,7 +148,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
     await _connectTo(raw,
         overrideRelays: _overrideRelays,
         useDefaultRelays: _useDefaultRelays,
-        customRelayUrls: _customRelayUrls);
+        customRelayUrls: _customRelayUrls,
+        maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses);
   }
 
   Future<void> _deleteConnection(SavedConnection connection) async {
@@ -174,11 +183,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
       _overrideRelays = conn.overrideRelays;
       _useDefaultRelays = conn.useDefaultRelays;
       _customRelayUrls = List.of(conn.customRelayUrls);
+      _maxRemoteNatTraversalAddresses = conn.maxRemoteNatTraversalAddresses;
     });
     _connectTo(conn.target,
         overrideRelays: conn.overrideRelays,
         useDefaultRelays: conn.useDefaultRelays,
-        customRelayUrls: conn.customRelayUrls);
+        customRelayUrls: conn.customRelayUrls,
+        maxRemoteNatTraversalAddresses: conn.maxRemoteNatTraversalAddresses);
   }
 
   @override
@@ -242,30 +253,28 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   children: [
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Override global relay settings'),
+                      title: const Text('Override global network settings'),
                       value: _overrideRelays,
                       onChanged: (value) =>
                           setState(() => _overrideRelays = value),
                     ),
-                    if (_overrideRelays) ...[
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Use default relays'),
-                        value: _useDefaultRelays,
-                        onChanged: (value) =>
-                            setState(() => _useDefaultRelays = value),
+                    if (_overrideRelays)
+                      NetworkSettingsEditor(
+                        value: NetworkSettings(
+                          useDefaultRelays: _useDefaultRelays,
+                          customRelayUrls: _customRelayUrls,
+                          maxRemoteNatTraversalAddresses:
+                              _maxRemoteNatTraversalAddresses,
+                        ),
+                        onChanged: (settings) {
+                          setState(() {
+                            _useDefaultRelays = settings.useDefaultRelays;
+                            _customRelayUrls = settings.customRelayUrls;
+                            _maxRemoteNatTraversalAddresses =
+                                settings.maxRemoteNatTraversalAddresses;
+                          });
+                        },
                       ),
-                      const SizedBox(height: 8),
-                      RelayUrlListEditor(
-                        label: 'Custom relays',
-                        helperText: _useDefaultRelays
-                            ? 'Added alongside defaults for this connection.'
-                            : 'Replaces defaults for this connection.',
-                        urls: _customRelayUrls,
-                        onChanged: (urls) =>
-                            setState(() => _customRelayUrls = urls),
-                      ),
-                    ],
                   ],
                 ),
                 const SizedBox(height: 16),
