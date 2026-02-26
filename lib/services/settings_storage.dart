@@ -1,17 +1,22 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 class AppSettings {
   final bool useDefaultRelays;
   final List<String> customRelayUrls;
   final int? maxRemoteNatTraversalAddresses;
+  final double terminalFontSize;
+  final String terminalTheme;
 
   AppSettings({
     this.useDefaultRelays = true,
     this.customRelayUrls = const [],
     this.maxRemoteNatTraversalAddresses,
+    this.terminalFontSize = 14.0,
+    this.terminalTheme = 'default',
   });
 
   Map<String, dynamic> toJson() => {
@@ -19,10 +24,15 @@ class AppSettings {
         'customRelayUrls': customRelayUrls,
         if (maxRemoteNatTraversalAddresses != null)
           'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
+        'terminalFontSize': terminalFontSize,
+        'terminalTheme': terminalTheme,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final maxNat = json['maxRemoteNatTraversalAddresses'] as int?;
+    final terminalFontSize =
+        (json['terminalFontSize'] as num?)?.toDouble() ?? 14.0;
+    final terminalTheme = json['terminalTheme'] as String? ?? 'default';
 
     // Backwards compat: migrate old relayUrls/extraRelayUrls
     if (json.containsKey('useDefaultRelays')) {
@@ -31,6 +41,8 @@ class AppSettings {
         customRelayUrls:
             (json['customRelayUrls'] as List?)?.cast<String>() ?? [],
         maxRemoteNatTraversalAddresses: maxNat,
+        terminalFontSize: terminalFontSize,
+        terminalTheme: terminalTheme,
       );
     }
     final oldRelayUrls =
@@ -42,12 +54,16 @@ class AppSettings {
         useDefaultRelays: false,
         customRelayUrls: oldRelayUrls,
         maxRemoteNatTraversalAddresses: maxNat,
+        terminalFontSize: terminalFontSize,
+        terminalTheme: terminalTheme,
       );
     }
     return AppSettings(
       useDefaultRelays: true,
       customRelayUrls: oldExtraRelayUrls,
       maxRemoteNatTraversalAddresses: maxNat,
+      terminalFontSize: terminalFontSize,
+      terminalTheme: terminalTheme,
     );
   }
 }
@@ -59,6 +75,9 @@ class SettingsStorage {
   SettingsStorage._();
 
   AppSettings? _cache;
+
+  @visibleForTesting
+  set cache(AppSettings? settings) => _cache = settings;
 
   Future<File> get _file async {
     final appDir = await getApplicationDocumentsDirectory();

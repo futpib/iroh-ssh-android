@@ -7,12 +7,16 @@ class TerminalPane extends StatefulWidget {
   final Terminal terminal;
   final FocusNode? focusNode;
   final bool autofocus;
+  final double fontSize;
+  final TerminalTheme theme;
 
   const TerminalPane({
     super.key,
     required this.terminal,
     this.focusNode,
     this.autofocus = false,
+    this.fontSize = 14.0,
+    this.theme = TerminalThemes.defaultTheme,
   });
 
   @override
@@ -27,6 +31,15 @@ class TerminalPaneState extends State<TerminalPane> {
 
   void requestFocus() {
     _focusNode.requestFocus();
+  }
+
+  void disableFocus() {
+    _focusNode.unfocus();
+    _focusNode.canRequestFocus = false;
+  }
+
+  void enableFocus() {
+    _focusNode.canRequestFocus = true;
   }
 
   @override
@@ -245,6 +258,8 @@ class TerminalPaneState extends State<TerminalPane> {
                         focusNode: _focusNode,
                         autofocus: widget.autofocus,
                         onKeyEvent: kDebugMode ? _onKeyEventPerf : null,
+                        theme: widget.theme,
+                        textStyle: TerminalStyle(fontSize: widget.fontSize),
                       ),
                     ),
                   ),

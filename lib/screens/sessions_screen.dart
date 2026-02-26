@@ -6,14 +6,19 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/screens/connect_screen.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
+import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/widgets/terminal_tab.dart';
 
 class SessionsScreen extends StatefulWidget {
   final SshSessionInfo initialSession;
 
+  @visibleForTesting
+  final bool connectOnInit;
+
   const SessionsScreen({
     super.key,
     required this.initialSession,
+    this.connectOnInit = true,
   });
 
   @override
@@ -27,6 +32,8 @@ class _SessionsScreenState extends State<SessionsScreen>
   late List<SshSessionInfo> _sessions;
   late TabController _tabController;
   final Map<int, GlobalKey<TerminalTabState>> _tabKeys = {};
+  double _terminalFontSize = 14.0;
+  String _terminalTheme = 'default';
 
   @override
   void initState() {
@@ -35,6 +42,7 @@ class _SessionsScreenState extends State<SessionsScreen>
     _tabController = TabController(length: 1, vsync: this);
     _tabController.addListener(_onTabChanged);
     _tabKeys[widget.initialSession.port] = GlobalKey<TerminalTabState>();
+    _loadTerminalSettings();
     if (_isAndroid) {
       _initForegroundTask();
     }
@@ -64,6 +72,16 @@ class _SessionsScreenState extends State<SessionsScreen>
       notificationTitle: 'iroh-ssh',
       notificationText: _notificationText,
     );
+  }
+
+  Future<void> _loadTerminalSettings() async {
+    final settings = await SettingsStorage.instance.load();
+    if (mounted) {
+      setState(() {
+        _terminalFontSize = settings.terminalFontSize;
+        _terminalTheme = settings.terminalTheme;
+      });
+    }
   }
 
   String get _notificationText {
@@ -147,11 +165,14 @@ class _SessionsScreenState extends State<SessionsScreen>
     }
   }
 
-  void _showConnectionInfo(SshSessionInfo session) {
-    showDialog(
+  Future<void> _showConnectionInfo(SshSessionInfo session) async {
+    final tabState = _tabKeys[session.port]?.currentState;
+    tabState?.disableFocus();
+    await showDialog(
       context: context,
       builder: (ctx) => _ConnectionInfoDialog(session: session),
     );
+    tabState?.enableFocus();
   }
 
   Future<bool> _onWillPop() async {
@@ -251,6 +272,9 @@ class _SessionsScreenState extends State<SessionsScreen>
               key: _tabKeys[session.port],
               session: session,
               onDisconnected: () => _closeSession(i),
+              connectOnInit: widget.connectOnInit,
+              fontSize: _terminalFontSize,
+              themeName: _terminalTheme,
             );
           }),
         ),

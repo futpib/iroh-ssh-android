@@ -13,6 +13,8 @@ import 'package:xterm/xterm.dart';
 class TerminalTab extends StatefulWidget {
   final SshSessionInfo session;
   final VoidCallback onDisconnected;
+  final double fontSize;
+  final String themeName;
 
   @visibleForTesting
   final bool connectOnInit;
@@ -21,6 +23,8 @@ class TerminalTab extends StatefulWidget {
     super.key,
     required this.session,
     required this.onDisconnected,
+    this.fontSize = 14.0,
+    this.themeName = 'default',
     this.connectOnInit = true,
   });
 
@@ -52,6 +56,14 @@ class TerminalTabState extends State<TerminalTab>
 
   void requestFocus() {
     _paneKey.currentState?.requestFocus();
+  }
+
+  void disableFocus() {
+    _paneKey.currentState?.disableFocus();
+  }
+
+  void enableFocus() {
+    _paneKey.currentState?.enableFocus();
   }
 
   @override
@@ -278,6 +290,10 @@ class TerminalTabState extends State<TerminalTab>
           key: _paneKey,
           terminal: _terminal,
           autofocus: true,
+          fontSize: widget.fontSize,
+          theme: widget.themeName == 'whiteOnBlack'
+              ? TerminalThemes.whiteOnBlack
+              : TerminalThemes.defaultTheme,
         ),
         if (_authFailed)
           Positioned(
