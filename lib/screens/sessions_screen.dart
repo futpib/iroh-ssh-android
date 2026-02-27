@@ -105,7 +105,10 @@ class _SessionsScreenState extends State<SessionsScreen>
   void _onTabChanged() {
     if (!_tabController.indexIsChanging) {
       final session = _sessions[_tabController.index];
-      _tabKeys[session.port]?.currentState?.requestFocus();
+      final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+      if (keyboardOpen) {
+        _tabKeys[session.port]?.currentState?.requestFocus();
+      }
       setState(() {});
     }
   }
