@@ -20,6 +20,7 @@ sealed class ServiceCommand {
       'detach' => DetachCommand.fromJson(json),
       'list_sessions' => ListSessionsCommand(),
       'auth_response' => AuthResponseCommand.fromJson(json),
+      'reconnect' => ReconnectCommand.fromJson(json),
       _ => throw ArgumentError('Unknown command type: ${json['type']}'),
     };
   }
@@ -164,6 +165,21 @@ class ListSessionsCommand extends ServiceCommand {
 
   @override
   Map<String, dynamic> toJson() => {'type': 'list_sessions'};
+}
+
+class ReconnectCommand extends ServiceCommand {
+  final String sessionId;
+
+  ReconnectCommand({required this.sessionId});
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'reconnect',
+        'sessionId': sessionId,
+      };
+
+  factory ReconnectCommand.fromJson(Map<String, dynamic> json) =>
+      ReconnectCommand(sessionId: json['sessionId'] as String);
 }
 
 class AuthResponseCommand extends ServiceCommand {

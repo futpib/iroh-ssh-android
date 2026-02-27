@@ -379,9 +379,9 @@ class TerminalTabState extends State<TerminalTab>
     setState(() => _authFailed = false);
     if (_isAndroid) {
       _terminal.write('\r\n');
-      // On Android, retry means reconnect via service — but the session
-      // may already be dead. For now, just signal disconnected.
-      widget.onDisconnected();
+      FlutterForegroundTask.sendDataToTask(ReconnectCommand(
+        sessionId: widget.session.sessionId,
+      ).encode());
     } else {
       _client?.close();
       _client = null;

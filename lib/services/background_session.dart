@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/terminal_replay_buffer.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 
@@ -12,8 +13,14 @@ class BackgroundSession {
   final String sessionId;
   final String displayName;
   final String username;
-  final int port;
+  int port;
   final List<SSHKeyPair> identities;
+
+  /// Connection parameters needed for reconnection.
+  final String endpointId;
+  final List<String> relayUrls;
+  final List<String> extraRelayUrls;
+  final int? maxRemoteNatTraversalAddresses;
 
   SSHClient? _client;
   SSHSession? _session;
@@ -23,6 +30,9 @@ class BackgroundSession {
 
   /// Callback to send events to the UI (set by the service).
   void Function(String data)? onSendToUi;
+
+  /// Called when the session has ended and should be removed.
+  void Function()? onSessionEnded;
 
   /// Pending auth prompt completer — waits for UI to respond.
   Completer<String>? _authCompleter;
@@ -43,6 +53,10 @@ class BackgroundSession {
     required this.username,
     required this.port,
     required this.identities,
+    required this.endpointId,
+    required this.relayUrls,
+    required this.extraRelayUrls,
+    this.maxRemoteNatTraversalAddresses,
   });
 
   Future<void> connect() async {
@@ -102,7 +116,10 @@ class BackgroundSession {
       final bytes = utf8.encode(errorMsg);
       replayBuffer.write(bytes);
       _forwardOutput(bytes);
-      disconnect(reason: e.toString());
+      // Set state to disconnected but don't send DisconnectedEvent —
+      // the UI will show a retry button via the ErrorEvent instead.
+      state = SessionState.disconnected;
+      _sendError(e.toString());
     }
   }
 
@@ -131,6 +148,15 @@ class BackgroundSession {
     final bytes = utf8.encode('$message\r\n');
     replayBuffer.write(bytes);
     _forwardOutput(bytes);
+  }
+
+  void _sendError(String message) {
+    if (onSendToUi != null) {
+      onSendToUi!(ErrorEvent(
+        sessionId: sessionId,
+        message: message,
+      ).encode());
+    }
   }
 
   Future<String> _requestAuth(String prompt, {required bool echo}) async {
@@ -186,6 +212,39 @@ class BackgroundSession {
     uiAttached = false;
   }
 
+  Future<void> reconnect() async {
+    // Clean up old SSH connection
+    _session?.close();
+    _client?.close();
+    _session = null;
+    _client = null;
+    _stdoutFlushTimer?.cancel();
+    _stderrFlushTimer?.cancel();
+    _authCompleter?.complete('');
+    _authCompleter = null;
+    for (final pending in _pendingAuthPrompts) {
+      pending.completer.complete('');
+    }
+    _pendingAuthPrompts.clear();
+
+    // Clean up old iroh tunnel
+    try {
+      await disconnectIroh(port: port);
+    } catch (_) {}
+
+    // Establish new iroh tunnel
+    _sendStatus('Reconnecting...');
+    port = await connectIroh(
+      endpointId: endpointId,
+      relayUrls: relayUrls,
+      extraRelayUrls: extraRelayUrls,
+      maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
+    );
+
+    // Start SSH over new tunnel
+    await connect();
+  }
+
   Future<void> disconnect({String reason = 'Disconnected'}) async {
     if (state == SessionState.disconnected) return;
     state = SessionState.disconnected;
@@ -210,6 +269,7 @@ class BackgroundSession {
       pending.completer.complete('');
     }
     _pendingAuthPrompts.clear();
+    onSessionEnded?.call();
   }
 }
 

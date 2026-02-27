@@ -36,6 +36,8 @@ class SshSessionService extends TaskHandler {
     switch (command) {
       case ConnectCommand():
         _handleConnect(command);
+      case ReconnectCommand():
+        _handleReconnect(command);
       case DisconnectCommand():
         _handleDisconnect(command);
       case InputCommand():
@@ -77,9 +79,14 @@ class SshSessionService extends TaskHandler {
         username: command.username,
         port: port,
         identities: identities,
+        endpointId: command.endpointId,
+        relayUrls: command.relayUrls,
+        extraRelayUrls: command.extraRelayUrls,
+        maxRemoteNatTraversalAddresses: command.maxRemoteNatTraversalAddresses,
       );
 
       session.onSendToUi = _sendToUi;
+      session.onSessionEnded = () => _removeSession(sessionId);
       session.uiAttached = true;
       _sessions[sessionId] = session;
 
@@ -93,15 +100,35 @@ class SshSessionService extends TaskHandler {
       _updateNotification();
 
       // Start SSH connection asynchronously
-      session.connect().then((_) {
-        // Connection completed (or failed) — check if we should clean up
-        if (session.state == SessionState.disconnected) {
-          _removeSession(sessionId);
-        }
-      });
+      session.connect();
     } catch (e) {
       _sendToUi(ErrorEvent(
         sessionId: sessionId,
+        message: e.toString(),
+      ).encode());
+    }
+  }
+
+  Future<void> _handleReconnect(ReconnectCommand command) async {
+    final session = _sessions[command.sessionId];
+    if (session == null) return;
+
+    try {
+      await session.reconnect();
+    } catch (e) {
+      // connectIroh failed — write error to terminal and send ErrorEvent
+      final errorMsg = '\r\nError: $e\r\n';
+      final bytes = utf8.encode(errorMsg);
+      session.replayBuffer.write(bytes);
+      if (session.uiAttached) {
+        _sendToUi(OutputEvent(
+          sessionId: command.sessionId,
+          dataBase64: base64Encode(bytes),
+        ).encode());
+      }
+      session.state = SessionState.disconnected;
+      _sendToUi(ErrorEvent(
+        sessionId: command.sessionId,
         message: e.toString(),
       ).encode());
     }
