@@ -35,6 +35,8 @@ class TerminalPaneState extends State<TerminalPane> {
   bool _isScaling = false;
   bool _wasKeyboardOpenBeforeScale = false;
   final _activePointers = <int>{};
+  final ScrollController _scrollController = ScrollController();
+  bool _keyboardOpen = false;
 
   void requestFocus() {
     _focusNode.requestFocus();
@@ -54,11 +56,46 @@ class TerminalPaneState extends State<TerminalPane> {
     super.initState();
     _currentFontSize = widget.fontSize;
     _focusNode = widget.focusNode ?? FocusNode();
+    widget.terminal.addListener(_onTerminalChange);
+  }
+
+  void _onTerminalChange() {
+    if (!_keyboardOpen) return;
+    if (_terminalHeight == null) return;
+    _scheduleScrollCorrection();
+  }
+
+  void _scheduleScrollCorrection() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_keyboardOpen) return;
+      if (!_scrollController.hasClients) return;
+      final viewHeight = widget.terminal.viewHeight;
+      if (viewHeight <= 0) return;
+      final cellHeight = _terminalHeight! / viewHeight;
+      final scrollBack =
+          widget.terminal.buffer.lines.length - viewHeight;
+      final cursorAbsY =
+          widget.terminal.buffer.cursorY + (scrollBack > 0 ? scrollBack : 0);
+      final viewportHeight = _scrollController.position.viewportDimension;
+      final cursorBottom = (cursorAbsY + 1) * cellHeight;
+      final target = (cursorBottom - viewportHeight).clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      );
+      if ((_scrollController.offset - target).abs() > 1.0) {
+        _scrollController.jumpTo(target);
+      }
+    });
   }
 
   @override
   void didUpdateWidget(TerminalPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.terminal != oldWidget.terminal) {
+      oldWidget.terminal.removeListener(_onTerminalChange);
+      widget.terminal.addListener(_onTerminalChange);
+    }
     if (widget.focusNode != oldWidget.focusNode) {
       if (oldWidget.focusNode == null) {
         _focusNode.dispose();
@@ -72,6 +109,8 @@ class TerminalPaneState extends State<TerminalPane> {
 
   @override
   void dispose() {
+    widget.terminal.removeListener(_onTerminalChange);
+    _scrollController.dispose();
     if (widget.focusNode == null) {
       _focusNode.dispose();
     }
@@ -205,6 +244,14 @@ class TerminalPaneState extends State<TerminalPane> {
     final mediaQuery = MediaQuery.of(context);
     final keyboardHeight = mediaQuery.viewInsets.bottom;
     final keyboardOpen = keyboardHeight > 0;
+    final wasKeyboardOpen = _keyboardOpen;
+    _keyboardOpen = keyboardOpen;
+    if (keyboardOpen) {
+      if (!wasKeyboardOpen && _scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
+      _scheduleScrollCorrection();
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final toolbarHeight = keyboardOpen ? _toolbarHeight : 0.0;
@@ -273,6 +320,7 @@ class TerminalPaneState extends State<TerminalPane> {
                       focusNode: _focusNode,
                       autofocus: widget.autofocus,
                       autoResize: !keyboardOpen,
+                      scrollController: _scrollController,
                       theme: widget.theme,
                       textStyle:
                           TerminalStyle(fontSize: _currentFontSize),
