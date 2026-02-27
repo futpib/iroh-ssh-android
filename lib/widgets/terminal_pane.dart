@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
+
+enum ModifierState { off, transient, locked }
 
 class TerminalPane extends StatefulWidget {
   final Terminal terminal;
@@ -25,11 +29,10 @@ class TerminalPane extends StatefulWidget {
 
 class TerminalPaneState extends State<TerminalPane> {
   late FocusNode _focusNode;
-  bool _ctrlActive = false;
-  bool _altActive = false;
+  ModifierState _ctrlState = ModifierState.off;
+  ModifierState _altState = ModifierState.off;
+  ModifierState _shiftState = ModifierState.off;
   double? _terminalHeight;
-  int? _savedViewWidth;
-  int? _savedViewHeight;
   late double _currentFontSize;
   double _baseScaleFontSize = 0;
   bool _isScaling = false;
@@ -37,6 +40,8 @@ class TerminalPaneState extends State<TerminalPane> {
   final _activePointers = <int>{};
   final ScrollController _scrollController = ScrollController();
   bool _keyboardOpen = false;
+  int _fnPage = 0;
+  Timer? _repeatTimer;
 
   void requestFocus() {
     _focusNode.requestFocus();
@@ -109,6 +114,7 @@ class TerminalPaneState extends State<TerminalPane> {
 
   @override
   void dispose() {
+    _repeatTimer?.cancel();
     widget.terminal.removeListener(_onTerminalChange);
     _scrollController.dispose();
     if (widget.focusNode == null) {
@@ -120,13 +126,23 @@ class TerminalPaneState extends State<TerminalPane> {
   String applyModifiers(String data) {
     final buf = StringBuffer();
     for (final char in data.codeUnits) {
-      if (_ctrlActive && char >= 0x61 && char <= 0x7a) {
+      if (ctrlActive && char >= 0x61 && char <= 0x7a) {
         buf.writeCharCode(char - 0x60);
-      } else if (_ctrlActive && char >= 0x41 && char <= 0x5a) {
+      } else if (ctrlActive && char >= 0x41 && char <= 0x5a) {
         buf.writeCharCode(char - 0x40);
-      } else if (_altActive) {
+      } else if (altActive) {
         buf.writeCharCode(0x1b);
-        buf.writeCharCode(char);
+        if (shiftActive) {
+          buf.writeCharCode(
+            (char >= 0x61 && char <= 0x7a) ? char - 0x20 : char,
+          );
+        } else {
+          buf.writeCharCode(char);
+        }
+      } else if (shiftActive) {
+        buf.writeCharCode(
+          (char >= 0x61 && char <= 0x7a) ? char - 0x20 : char,
+        );
       } else {
         buf.writeCharCode(char);
       }
@@ -134,64 +150,142 @@ class TerminalPaneState extends State<TerminalPane> {
     return buf.toString();
   }
 
-  bool get ctrlActive => _ctrlActive;
-  bool get altActive => _altActive;
+  bool get ctrlActive =>
+      _ctrlState == ModifierState.transient ||
+      _ctrlState == ModifierState.locked;
+
+  bool get altActive =>
+      _altState == ModifierState.transient ||
+      _altState == ModifierState.locked;
+
+  bool get shiftActive =>
+      _shiftState == ModifierState.transient ||
+      _shiftState == ModifierState.locked;
 
   void clearModifiers() {
-    if (_ctrlActive) setState(() => _ctrlActive = false);
-    if (_altActive) setState(() => _altActive = false);
+    if (_ctrlState == ModifierState.transient) {
+      setState(() => _ctrlState = ModifierState.off);
+    }
+    if (_altState == ModifierState.transient) {
+      setState(() => _altState = ModifierState.off);
+    }
+    if (_shiftState == ModifierState.transient) {
+      setState(() => _shiftState = ModifierState.off);
+    }
   }
 
   void _sendKey(TerminalKey key) {
-    widget.terminal.keyInput(key, ctrl: _ctrlActive, alt: _altActive);
-    if (_ctrlActive) setState(() => _ctrlActive = false);
-    if (_altActive) setState(() => _altActive = false);
+    widget.terminal.keyInput(
+      key,
+      ctrl: ctrlActive,
+      alt: altActive,
+      shift: shiftActive,
+    );
+    clearModifiers();
   }
 
   static const double _toolbarHeight = 64;
+  static const int _fnPageCount = 2;
 
-  void _sendChar(String char) {
-    widget.terminal.textInput(char);
+  void _cycleModifier(
+    ModifierState current,
+    void Function(ModifierState) setter,
+  ) {
+    switch (current) {
+      case ModifierState.off:
+        setter(ModifierState.transient);
+      case ModifierState.transient:
+        setter(ModifierState.locked);
+      case ModifierState.locked:
+        setter(ModifierState.off);
+    }
   }
 
   Widget _buildToolbar() {
-    return Container(
-      color: const Color(0xFF1E1E1E),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              _toolbarButton('ESC', () => _sendKey(TerminalKey.escape)),
-              _toolbarButton('/', () => _sendChar('/')),
-              _toolbarButton('-', () => _sendChar('-')),
-              _toolbarButton('HOME', () => _sendKey(TerminalKey.home)),
-              _toolbarButton('↑', () => _sendKey(TerminalKey.arrowUp)),
-              _toolbarButton('END', () => _sendKey(TerminalKey.end)),
-              _toolbarButton('PGUP', () => _sendKey(TerminalKey.pageUp)),
-            ],
-          ),
-          Row(
-            children: [
-              _toolbarButton('TAB', () => _sendKey(TerminalKey.tab)),
-              _toolbarToggle('CTRL', _ctrlActive, () {
-                setState(() => _ctrlActive = !_ctrlActive);
-              }),
-              _toolbarToggle('ALT', _altActive, () {
-                setState(() => _altActive = !_altActive);
-              }),
-              _toolbarButton('←', () => _sendKey(TerminalKey.arrowLeft)),
-              _toolbarButton('↓', () => _sendKey(TerminalKey.arrowDown)),
-              _toolbarButton('→', () => _sendKey(TerminalKey.arrowRight)),
-              _toolbarButton('PGDN', () => _sendKey(TerminalKey.pageDown)),
-            ],
-          ),
-        ],
+    return GestureDetector(
+      onVerticalDragEnd: (details) {
+        if (details.primaryVelocity == null) return;
+        if (details.primaryVelocity! < -100) {
+          setState(() => _fnPage = (_fnPage + 1) % _fnPageCount);
+        } else if (details.primaryVelocity! > 100) {
+          setState(
+            () => _fnPage = (_fnPage - 1 + _fnPageCount) % _fnPageCount,
+          );
+        }
+      },
+      child: Container(
+        color: const Color(0xFF1E1E1E),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(children: _buildRow1()),
+            Row(children: _buildRow2()),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _toolbarButton(String label, VoidCallback onPressed) {
+  List<Widget> _buildRow1() {
+    if (_fnPage == 1) {
+      return [
+        _toolbarButton('F1', () => _sendKey(TerminalKey.f1)),
+        _toolbarButton('F2', () => _sendKey(TerminalKey.f2)),
+        _toolbarButton('F3', () => _sendKey(TerminalKey.f3)),
+        _toolbarButton('F4', () => _sendKey(TerminalKey.f4)),
+        _toolbarButton('F5', () => _sendKey(TerminalKey.f5)),
+        _toolbarButton('F6', () => _sendKey(TerminalKey.f6)),
+        _toolbarButton('', null),
+        _repeatableToolbarButton('INS', () => _sendKey(TerminalKey.insert)),
+      ];
+    }
+    return [
+      _toolbarButton('ESC', () => _sendKey(TerminalKey.escape)),
+      _modifierButton('SHIFT', _shiftState, () {
+        setState(() => _cycleModifier(_shiftState, (s) => _shiftState = s));
+      }),
+      _toolbarButton('', null),
+      _toolbarButton('', null),
+      _repeatableToolbarButton('HOME', () => _sendKey(TerminalKey.home)),
+      _repeatableToolbarButton('↑', () => _sendKey(TerminalKey.arrowUp)),
+      _repeatableToolbarButton('END', () => _sendKey(TerminalKey.end)),
+      _repeatableToolbarButton('PGUP', () => _sendKey(TerminalKey.pageUp)),
+    ];
+  }
+
+  List<Widget> _buildRow2() {
+    if (_fnPage == 1) {
+      return [
+        _toolbarButton('F7', () => _sendKey(TerminalKey.f7)),
+        _toolbarButton('F8', () => _sendKey(TerminalKey.f8)),
+        _toolbarButton('F9', () => _sendKey(TerminalKey.f9)),
+        _toolbarButton('F10', () => _sendKey(TerminalKey.f10)),
+        _toolbarButton('F11', () => _sendKey(TerminalKey.f11)),
+        _toolbarButton('F12', () => _sendKey(TerminalKey.f12)),
+        _toolbarButton('', null),
+        _repeatableToolbarButton('DEL', () => _sendKey(TerminalKey.delete)),
+      ];
+    }
+    return [
+      _toolbarButton('TAB', () => _sendKey(TerminalKey.tab)),
+      _modifierButton('CTRL', _ctrlState, () {
+        setState(() => _cycleModifier(_ctrlState, (s) => _ctrlState = s));
+      }),
+      _modifierButton('ALT', _altState, () {
+        setState(() => _cycleModifier(_altState, (s) => _altState = s));
+      }),
+      _toolbarButton('', null),
+      _repeatableToolbarButton('←', () => _sendKey(TerminalKey.arrowLeft)),
+      _repeatableToolbarButton('↓', () => _sendKey(TerminalKey.arrowDown)),
+      _repeatableToolbarButton('→', () => _sendKey(TerminalKey.arrowRight)),
+      _repeatableToolbarButton(
+        'PGDN',
+        () => _sendKey(TerminalKey.pageDown),
+      ),
+    ];
+  }
+
+  Widget _toolbarButton(String label, VoidCallback? onPressed) {
     return Expanded(
       child: SizedBox(
         height: 32,
@@ -213,7 +307,43 @@ class TerminalPaneState extends State<TerminalPane> {
     );
   }
 
-  Widget _toolbarToggle(String label, bool active, VoidCallback onPressed) {
+  Widget _repeatableToolbarButton(String label, VoidCallback onPressed) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onPressed,
+        onLongPressStart: (_) {
+          onPressed();
+          _repeatTimer = Timer.periodic(
+            const Duration(milliseconds: 50),
+            (_) => onPressed(),
+          );
+        },
+        onLongPressEnd: (_) {
+          _repeatTimer?.cancel();
+          _repeatTimer = null;
+        },
+        child: SizedBox(
+          height: 32,
+          child: Container(
+            color: const Color(0xFF2D2D2D),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _modifierButton(
+    String label,
+    ModifierState state,
+    VoidCallback onPressed,
+  ) {
+    final isActive = state != ModifierState.off;
+    final isLocked = state == ModifierState.locked;
     return Expanded(
       child: SizedBox(
         height: 32,
@@ -223,21 +353,24 @@ class TerminalPaneState extends State<TerminalPane> {
           padding: EdgeInsets.zero,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           shape: const RoundedRectangleBorder(),
-          color: active ? Colors.blueGrey : const Color(0xFF2D2D2D),
+          color: isActive ? Colors.blueGrey : const Color(0xFF2D2D2D),
           elevation: 0,
           onPressed: onPressed,
           child: Text(
             label,
             style: TextStyle(
-              color: active ? Colors.white : Colors.white70,
+              color: isActive ? Colors.white : Colors.white70,
               fontSize: 12,
-              fontWeight: active ? FontWeight.bold : FontWeight.normal,
+              fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+              decoration: isLocked ? TextDecoration.underline : null,
+              decorationColor: Colors.white,
             ),
           ),
         ),
       ),
     );
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -257,8 +390,6 @@ class TerminalPaneState extends State<TerminalPane> {
         final toolbarHeight = keyboardOpen ? _toolbarHeight : 0.0;
         if (!keyboardOpen) {
           _terminalHeight = constraints.maxHeight;
-          _savedViewWidth = widget.terminal.viewWidth;
-          _savedViewHeight = widget.terminal.viewHeight;
         }
         final terminalHeight = keyboardOpen
             ? constraints.maxHeight - keyboardHeight - toolbarHeight

@@ -121,7 +121,7 @@ class TerminalTabState extends State<TerminalTab>
     }
 
     final paneState = _paneKey.currentState;
-    if (paneState != null && (paneState.ctrlActive || paneState.altActive)) {
+    if (paneState != null && (paneState.ctrlActive || paneState.altActive || paneState.shiftActive)) {
       final modified = paneState.applyModifiers(data);
       paneState.clearModifiers();
       _session?.write(utf8.encode(modified));
