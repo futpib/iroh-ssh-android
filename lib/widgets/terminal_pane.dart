@@ -451,6 +451,7 @@ class TerminalPaneState extends State<TerminalPane> {
                       focusNode: _focusNode,
                       autofocus: widget.autofocus,
                       autoResize: !keyboardOpen,
+                      scrollOnInput: !keyboardOpen,
                       scrollController: _scrollController,
                       theme: widget.theme,
                       textStyle:

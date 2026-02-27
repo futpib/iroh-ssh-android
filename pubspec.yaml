@@ -37,7 +37,10 @@ dependencies:
   iroh_ssh_proxy:
     path: rust_builder
   flutter_rust_bridge: 2.11.1
-  xterm: ^4.0.0
+  xterm:
+    git:
+      url: https://github.com/futpib/xterm.dart
+      ref: master
   dartssh2: ^2.13.0
   path_provider: ^2.1.5
   pinenacl: ^0.6.0
