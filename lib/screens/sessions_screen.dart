@@ -7,6 +7,7 @@ import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/screens/connect_screen.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
+import 'package:iroh_ssh_app/widgets/terminal_pane.dart';
 import 'package:iroh_ssh_app/widgets/terminal_tab.dart';
 
 class SessionsScreen extends StatefulWidget {
@@ -34,6 +35,7 @@ class _SessionsScreenState extends State<SessionsScreen>
   final Map<int, GlobalKey<TerminalTabState>> _tabKeys = {};
   double _terminalFontSize = 14.0;
   String _terminalTheme = 'default';
+  final ValueNotifier<bool> _scalingNotifier = ValueNotifier(false);
 
   @override
   void initState() {
@@ -117,6 +119,7 @@ class _SessionsScreenState extends State<SessionsScreen>
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _scalingNotifier.dispose();
     _stopForegroundTask();
     super.dispose();
   }
@@ -268,19 +271,23 @@ class _SessionsScreenState extends State<SessionsScreen>
                     : null,
               ),
         body: TabBarView(
-          controller: _tabController,
-          children: List.generate(_sessions.length, (i) {
-            final session = _sessions[i];
-            return TerminalTab(
-              key: _tabKeys[session.port],
-              session: session,
-              onDisconnected: () => _closeSession(i),
-              connectOnInit: widget.connectOnInit,
-              fontSize: _terminalFontSize,
-              themeName: _terminalTheme,
-            );
-          }),
-        ),
+            controller: _tabController,
+            physics: ScaleAwareScrollPhysics(_scalingNotifier),
+            children: List.generate(_sessions.length, (i) {
+              final session = _sessions[i];
+              return TerminalTab(
+                key: _tabKeys[session.port],
+                session: session,
+                onDisconnected: () => _closeSession(i),
+                connectOnInit: widget.connectOnInit,
+                fontSize: _terminalFontSize,
+                themeName: _terminalTheme,
+                onScalingChanged: (scaling) {
+                  _scalingNotifier.value = scaling;
+                },
+              );
+            }),
+          ),
       );
         },
       ),

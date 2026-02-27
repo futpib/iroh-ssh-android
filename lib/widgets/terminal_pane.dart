@@ -1,9 +1,24 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
 
 enum ModifierState { off, transient, locked }
+
+class ScaleAwareScrollPhysics extends ScrollPhysics {
+  final ValueNotifier<bool> scaling;
+
+  const ScaleAwareScrollPhysics(this.scaling, {super.parent});
+
+  @override
+  ScaleAwareScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return ScaleAwareScrollPhysics(scaling, parent: buildParent(ancestor));
+  }
+
+  @override
+  bool get allowUserScrolling => !scaling.value;
+}
 
 class TerminalPane extends StatefulWidget {
   final Terminal terminal;
@@ -12,6 +27,7 @@ class TerminalPane extends StatefulWidget {
   final double fontSize;
   final TerminalTheme theme;
   final ValueChanged<double>? onFontSizeChanged;
+  final ValueChanged<bool>? onScalingChanged;
 
   const TerminalPane({
     super.key,
@@ -21,13 +37,14 @@ class TerminalPane extends StatefulWidget {
     this.fontSize = 14.0,
     this.theme = TerminalThemes.defaultTheme,
     this.onFontSizeChanged,
+    this.onScalingChanged,
   });
 
   @override
   State<TerminalPane> createState() => TerminalPaneState();
 }
 
-class TerminalPaneState extends State<TerminalPane> {
+class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderStateMixin {
   late FocusNode _focusNode;
   ModifierState _ctrlState = ModifierState.off;
   ModifierState _altState = ModifierState.off;
@@ -37,8 +54,15 @@ class TerminalPaneState extends State<TerminalPane> {
   double _baseScaleFontSize = 0;
   bool _isScaling = false;
   bool _wasKeyboardOpenBeforeScale = false;
-  final _activePointers = <int>{};
+  final _pointerPositions = <int, Offset>{};
+  double? _initialPointerDistance;
+  int? _scrollPointerId;
+  double? _scrollPointerStartY;
+  double _scrollStartOffset = 0;
+  VelocityTracker? _velocityTracker;
+  AnimationController? _flingController;
   final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<bool> scalingNotifier = ValueNotifier(false);
   bool _keyboardOpen = false;
   int _fnPage = 0;
   Timer? _repeatTimer;
@@ -61,7 +85,34 @@ class TerminalPaneState extends State<TerminalPane> {
     super.initState();
     _currentFontSize = widget.fontSize;
     _focusNode = widget.focusNode ?? FocusNode();
+    _flingController = AnimationController.unbounded(vsync: this);
+    _flingController!.addListener(_onFlingTick);
     widget.terminal.addListener(_onTerminalChange);
+  }
+
+  void _onFlingTick() {
+    if (_scrollController.hasClients) {
+      final target = _flingController!.value.clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      );
+      _scrollController.jumpTo(target);
+    }
+  }
+
+  void _startFling() {
+    if (_velocityTracker == null || !_scrollController.hasClients) return;
+    final estimate = _velocityTracker!.getVelocityEstimate();
+    _velocityTracker = null;
+    if (estimate == null) return;
+    final pixelsPerSecond = -estimate.pixelsPerSecond.dy;
+    if (pixelsPerSecond.abs() < 50) return;
+    final position = _scrollController.offset;
+    final simulation = ClampingScrollSimulation(
+      position: position,
+      velocity: pixelsPerSecond,
+    );
+    _flingController!.animateWith(simulation);
   }
 
   void _onTerminalChange() {
@@ -115,7 +166,9 @@ class TerminalPaneState extends State<TerminalPane> {
   @override
   void dispose() {
     _repeatTimer?.cancel();
+    _flingController?.dispose();
     widget.terminal.removeListener(_onTerminalChange);
+    scalingNotifier.dispose();
     _scrollController.dispose();
     if (widget.focusNode == null) {
       _focusNode.dispose();
@@ -404,59 +457,100 @@ class TerminalPaneState extends State<TerminalPane> {
                 removeBottom: true,
                 child: Listener(
                   onPointerDown: (event) {
-                    _activePointers.add(event.pointer);
-                    if (_activePointers.length >= 2 && !_isScaling) {
+                    _pointerPositions[event.pointer] = event.position;
+                    _flingController?.stop();
+                    if (_pointerPositions.length == 1) {
+                      _scrollPointerId = event.pointer;
+                      _scrollPointerStartY = event.position.dy;
+                      _scrollStartOffset = _scrollController.hasClients
+                          ? _scrollController.offset
+                          : 0;
+                      _velocityTracker = VelocityTracker.withKind(event.kind);
+                      _velocityTracker!.addPosition(event.timeStamp, event.position);
+                    }
+                    if (_pointerPositions.length >= 2 && !_isScaling) {
                       _isScaling = true;
+                      _scrollPointerId = null;
+                      _velocityTracker = null;
                       _wasKeyboardOpenBeforeScale = keyboardOpen;
+                      _baseScaleFontSize = _currentFontSize;
+                      final positions = _pointerPositions.values.toList();
+                      _initialPointerDistance = (positions[0] - positions[1]).distance;
+                      scalingNotifier.value = true;
                       _focusNode.unfocus();
                       _focusNode.canRequestFocus = false;
+                      widget.onScalingChanged?.call(true);
                     }
                   },
-                  onPointerUp: (event) {
-                    _activePointers.remove(event.pointer);
-                    if (_activePointers.isEmpty && _isScaling) {
-                      _focusNode.canRequestFocus = true;
-                      if (_wasKeyboardOpenBeforeScale) {
-                        _focusNode.requestFocus();
-                      }
-                      _isScaling = false;
-                    }
-                  },
-                  onPointerCancel: (event) {
-                    _activePointers.remove(event.pointer);
-                    if (_activePointers.isEmpty && _isScaling) {
-                      _focusNode.canRequestFocus = true;
-                      if (_wasKeyboardOpenBeforeScale) {
-                        _focusNode.requestFocus();
-                      }
-                      _isScaling = false;
-                    }
-                  },
-                  child: GestureDetector(
-                    onScaleStart: (_) {
-                      _baseScaleFontSize = _currentFontSize;
-                    },
-                    onScaleUpdate: (details) {
-                      if (details.pointerCount < 2) return;
-                      final newSize = (_baseScaleFontSize * details.scale)
+                  onPointerMove: (event) {
+                    _pointerPositions[event.pointer] = event.position;
+                    if (_isScaling && _pointerPositions.length >= 2 && _initialPointerDistance != null && _initialPointerDistance! > 0) {
+                      final positions = _pointerPositions.values.toList();
+                      final currentDistance = (positions[0] - positions[1]).distance;
+                      final scale = currentDistance / _initialPointerDistance!;
+                      final newSize = (_baseScaleFontSize * scale)
                           .clamp(8.0, 24.0)
                           .roundToDouble();
                       if (newSize != _currentFontSize) {
                         setState(() => _currentFontSize = newSize);
                         widget.onFontSizeChanged?.call(newSize);
                       }
-                    },
-                    child: TerminalView(
-                      widget.terminal,
-                      focusNode: _focusNode,
-                      autofocus: widget.autofocus,
-                      autoResize: !keyboardOpen,
-                      scrollOnInput: !keyboardOpen,
-                      scrollController: _scrollController,
-                      theme: widget.theme,
-                      textStyle:
-                          TerminalStyle(fontSize: _currentFontSize),
-                    ),
+                    } else if (!_isScaling && _scrollPointerId == event.pointer && _scrollPointerStartY != null) {
+                      _velocityTracker?.addPosition(event.timeStamp, event.position);
+                      if (_scrollController.hasClients) {
+                        final dy = _scrollPointerStartY! - event.position.dy;
+                        final target = (_scrollStartOffset + dy).clamp(
+                          0.0,
+                          _scrollController.position.maxScrollExtent,
+                        );
+                        _scrollController.jumpTo(target);
+                      }
+                    }
+                  },
+                  onPointerUp: (event) {
+                    _pointerPositions.remove(event.pointer);
+                    if (event.pointer == _scrollPointerId) {
+                      _startFling();
+                      _scrollPointerId = null;
+                    }
+                    if (_pointerPositions.length < 2 && _isScaling) {
+                      _isScaling = false;
+                      _initialPointerDistance = null;
+                      scalingNotifier.value = false;
+                      _focusNode.canRequestFocus = true;
+                      if (_wasKeyboardOpenBeforeScale) {
+                        _focusNode.requestFocus();
+                      }
+                      widget.onScalingChanged?.call(false);
+                    }
+                  },
+                  onPointerCancel: (event) {
+                    _pointerPositions.remove(event.pointer);
+                    if (event.pointer == _scrollPointerId) {
+                      _scrollPointerId = null;
+                    }
+                    if (_pointerPositions.length < 2 && _isScaling) {
+                      _isScaling = false;
+                      _initialPointerDistance = null;
+                      scalingNotifier.value = false;
+                      _focusNode.canRequestFocus = true;
+                      if (_wasKeyboardOpenBeforeScale) {
+                        _focusNode.requestFocus();
+                      }
+                      widget.onScalingChanged?.call(false);
+                    }
+                  },
+                  child: TerminalView(
+                    widget.terminal,
+                    focusNode: _focusNode,
+                    autofocus: widget.autofocus,
+                    autoResize: !keyboardOpen,
+                    scrollOnInput: !keyboardOpen,
+                    scrollController: _scrollController,
+                    scrollPhysics: const NeverScrollableScrollPhysics(),
+                    theme: widget.theme,
+                    textStyle:
+                        TerminalStyle(fontSize: _currentFontSize),
                   ),
                 ),
               ),

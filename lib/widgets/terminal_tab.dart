@@ -14,6 +14,7 @@ class TerminalTab extends StatefulWidget {
   final VoidCallback onDisconnected;
   final double fontSize;
   final String themeName;
+  final ValueChanged<bool>? onScalingChanged;
 
   @visibleForTesting
   final bool connectOnInit;
@@ -25,6 +26,7 @@ class TerminalTab extends StatefulWidget {
     this.fontSize = 14.0,
     this.themeName = 'default',
     this.connectOnInit = true,
+    this.onScalingChanged,
   });
 
   @override
@@ -272,6 +274,7 @@ class TerminalTabState extends State<TerminalTab>
           onFontSizeChanged: (newSize) {
             setState(() => _fontSize = newSize);
           },
+          onScalingChanged: widget.onScalingChanged,
         ),
         if (_authFailed)
           Positioned(
