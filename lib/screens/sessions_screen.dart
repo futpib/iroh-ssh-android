@@ -5,20 +5,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/screens/connect_screen.dart';
-import 'package:iroh_ssh_app/src/rust/api/simple.dart';
+import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
+import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/widgets/terminal_pane.dart';
 import 'package:iroh_ssh_app/widgets/terminal_tab.dart';
 
 class SessionsScreen extends StatefulWidget {
-  final SshSessionInfo initialSession;
+  final List<SshSessionInfo> existingSessions;
 
   @visibleForTesting
   final bool connectOnInit;
 
   const SessionsScreen({
     super.key,
-    required this.initialSession,
+    required this.existingSessions,
     this.connectOnInit = true,
   });
 
@@ -32,48 +33,62 @@ class _SessionsScreenState extends State<SessionsScreen>
 
   late List<SshSessionInfo> _sessions;
   late TabController _tabController;
-  final Map<int, GlobalKey<TerminalTabState>> _tabKeys = {};
+  final Map<String, GlobalKey<TerminalTabState>> _tabKeys = {};
   double _terminalFontSize = 14.0;
   String _terminalTheme = 'default';
   final ValueNotifier<bool> _scalingNotifier = ValueNotifier(false);
+  void Function(Object)? _serviceDataCallback;
 
   @override
   void initState() {
     super.initState();
-    _sessions = [widget.initialSession];
-    _tabController = TabController(length: 1, vsync: this);
+    _sessions = List.of(widget.existingSessions);
+    _tabController = TabController(length: _sessions.length, vsync: this);
     _tabController.addListener(_onTabChanged);
-    _tabKeys[widget.initialSession.port] = GlobalKey<TerminalTabState>();
+    for (final session in _sessions) {
+      _tabKeys[session.sessionId] = GlobalKey<TerminalTabState>();
+    }
     _loadTerminalSettings();
     if (_isAndroid) {
-      _initForegroundTask();
+      _listenToService();
     }
   }
 
-  Future<void> _initForegroundTask() async {
-    FlutterForegroundTask.init(
-      androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'iroh_ssh_foreground',
-        channelName: 'SSH Session',
-        channelDescription: 'Keeps SSH sessions alive in the background',
-        channelImportance: NotificationChannelImportance.LOW,
-        priority: NotificationPriority.LOW,
-      ),
-      iosNotificationOptions: const IOSNotificationOptions(),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.nothing(),
-        autoRunOnBoot: false,
-        autoRunOnMyPackageReplaced: false,
-        allowWakeLock: true,
-        allowWifiLock: true,
-      ),
-    );
+  void _listenToService() {
+    _serviceDataCallback = _onServiceData;
+    FlutterForegroundTask.addTaskDataCallback(_serviceDataCallback!);
+  }
 
-    await FlutterForegroundTask.requestNotificationPermission();
-    await FlutterForegroundTask.startService(
-      notificationTitle: 'iroh-ssh',
-      notificationText: _notificationText,
-    );
+  void _onServiceData(Object data) {
+    if (data is! String) return;
+    try {
+      final event = ServiceEvent.decode(data);
+      switch (event) {
+        case DisconnectedEvent():
+          _onSessionDisconnected(event.sessionId, event.reason);
+        case ConnectedEvent():
+          // New session added via the add-session flow
+          _onNewSessionConnected(event);
+        case SessionListEvent():
+          // Could be used for refresh, but we already have the list
+          break;
+        default:
+          // output, replay, auth_prompt, etc. are handled by TerminalTab
+          break;
+      }
+    } catch (_) {}
+  }
+
+  void _onSessionDisconnected(String sessionId, String reason) {
+    final index = _sessions.indexWhere((s) => s.sessionId == sessionId);
+    if (index < 0) return;
+    _closeSessionAt(index);
+  }
+
+  void _onNewSessionConnected(ConnectedEvent event) {
+    // This is handled by ConnectScreen's completer, not here.
+    // But if somehow we get a connected event for a session we don't know about,
+    // we could add it. For now, no-op.
   }
 
   Future<void> _loadTerminalSettings() async {
@@ -86,30 +101,12 @@ class _SessionsScreenState extends State<SessionsScreen>
     }
   }
 
-  String get _notificationText {
-    final count = _sessions.length;
-    return '$count active session${count > 1 ? 's' : ''}';
-  }
-
-  Future<void> _updateNotification() async {
-    if (!_isAndroid) return;
-    await FlutterForegroundTask.updateService(
-      notificationTitle: 'iroh-ssh',
-      notificationText: _notificationText,
-    );
-  }
-
-  Future<void> _stopForegroundTask() async {
-    if (!_isAndroid) return;
-    await FlutterForegroundTask.stopService();
-  }
-
   void _onTabChanged() {
     if (!_tabController.indexIsChanging) {
       final session = _sessions[_tabController.index];
       final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
       if (keyboardOpen) {
-        _tabKeys[session.port]?.currentState?.requestFocus();
+        _tabKeys[session.sessionId]?.currentState?.requestFocus();
       }
       setState(() {});
     }
@@ -117,10 +114,12 @@ class _SessionsScreenState extends State<SessionsScreen>
 
   @override
   void dispose() {
+    if (_serviceDataCallback != null) {
+      FlutterForegroundTask.removeTaskDataCallback(_serviceDataCallback!);
+    }
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _scalingNotifier.dispose();
-    _stopForegroundTask();
     super.dispose();
   }
 
@@ -144,35 +143,43 @@ class _SessionsScreenState extends State<SessionsScreen>
     if (result != null && mounted) {
       setState(() {
         _sessions.add(result);
-        _tabKeys[result.port] = GlobalKey<TerminalTabState>();
+        _tabKeys[result.sessionId] = GlobalKey<TerminalTabState>();
         _rebuildTabController(_sessions.length,
             newIndex: _sessions.length - 1);
       });
-      _updateNotification();
     }
   }
 
   void _closeSession(int index) {
     final session = _sessions[index];
-    _tabKeys.remove(session.port);
+    // Send disconnect to service
+    if (_isAndroid) {
+      FlutterForegroundTask.sendDataToTask(
+        DisconnectCommand(sessionId: session.sessionId).encode(),
+      );
+    }
+    _closeSessionAt(index);
+  }
+
+  void _closeSessionAt(int index) {
+    if (index >= _sessions.length) return;
+    final session = _sessions[index];
+    _tabKeys.remove(session.sessionId);
 
     setState(() {
       _sessions.removeAt(index);
       if (_sessions.isEmpty) {
-        _stopForegroundTask();
         Navigator.of(context).pop();
         return;
       }
-      final newIndex = index >= _sessions.length ? _sessions.length - 1 : index;
+      final newIndex =
+          index >= _sessions.length ? _sessions.length - 1 : index;
       _rebuildTabController(_sessions.length, newIndex: newIndex);
     });
-    if (_sessions.isNotEmpty) {
-      _updateNotification();
-    }
   }
 
   Future<void> _showConnectionInfo(SshSessionInfo session) async {
-    final tabState = _tabKeys[session.port]?.currentState;
+    final tabState = _tabKeys[session.sessionId]?.currentState;
     tabState?.disableFocus();
     await showDialog(
       context: context,
@@ -184,6 +191,17 @@ class _SessionsScreenState extends State<SessionsScreen>
   Future<bool> _onWillPop() async {
     if (_sessions.isEmpty) return true;
 
+    if (_isAndroid) {
+      // Detach all sessions and go back — sessions keep running in background
+      for (final session in _sessions) {
+        FlutterForegroundTask.sendDataToTask(
+          DetachCommand(sessionId: session.sessionId).encode(),
+        );
+      }
+      return true;
+    }
+
+    // Non-Android: confirm disconnect
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -220,7 +238,6 @@ class _SessionsScreenState extends State<SessionsScreen>
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         if (await _onWillPop()) {
-          await _stopForegroundTask();
           if (context.mounted) {
             Navigator.of(context).pop();
           }
@@ -230,65 +247,67 @@ class _SessionsScreenState extends State<SessionsScreen>
         builder: (context) {
           final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
           return Scaffold(
-        resizeToAvoidBottomInset: false,
-        appBar: keyboardOpen
-            ? null
-            : AppBar(
-                title: Text(currentSession.displayName),
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.info_outline),
-                    onPressed: () => _showConnectionInfo(currentSession),
-                    tooltip: 'Connection info',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: _addSession,
-                    tooltip: 'New connection',
-                  ),
-                ],
-                bottom: _sessions.length > 1
-                    ? TabBar(
-                        controller: _tabController,
-                        isScrollable: true,
-                        tabs: List.generate(_sessions.length, (i) {
-                          final session = _sessions[i];
-                          return Tab(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(session.username),
-                                const SizedBox(width: 4),
-                                GestureDetector(
-                                  onTap: () => _closeSession(i),
-                                  child: const Icon(Icons.close, size: 16),
+            resizeToAvoidBottomInset: false,
+            appBar: keyboardOpen
+                ? null
+                : AppBar(
+                    title: Text(currentSession.displayName),
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.info_outline),
+                        onPressed: () =>
+                            _showConnectionInfo(currentSession),
+                        tooltip: 'Connection info',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        onPressed: _addSession,
+                        tooltip: 'New connection',
+                      ),
+                    ],
+                    bottom: _sessions.length > 1
+                        ? TabBar(
+                            controller: _tabController,
+                            isScrollable: true,
+                            tabs: List.generate(_sessions.length, (i) {
+                              final session = _sessions[i];
+                              return Tab(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(session.username),
+                                    const SizedBox(width: 4),
+                                    GestureDetector(
+                                      onTap: () => _closeSession(i),
+                                      child:
+                                          const Icon(Icons.close, size: 16),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          );
-                        }),
-                      )
-                    : null,
-              ),
-        body: TabBarView(
-            controller: _tabController,
-            physics: ScaleAwareScrollPhysics(_scalingNotifier),
-            children: List.generate(_sessions.length, (i) {
-              final session = _sessions[i];
-              return TerminalTab(
-                key: _tabKeys[session.port],
-                session: session,
-                onDisconnected: () => _closeSession(i),
-                connectOnInit: widget.connectOnInit,
-                fontSize: _terminalFontSize,
-                themeName: _terminalTheme,
-                onScalingChanged: (scaling) {
-                  _scalingNotifier.value = scaling;
-                },
-              );
-            }),
-          ),
-      );
+                              );
+                            }),
+                          )
+                        : null,
+                  ),
+            body: TabBarView(
+              controller: _tabController,
+              physics: ScaleAwareScrollPhysics(_scalingNotifier),
+              children: List.generate(_sessions.length, (i) {
+                final session = _sessions[i];
+                return TerminalTab(
+                  key: _tabKeys[session.sessionId],
+                  session: session,
+                  onDisconnected: () => _closeSession(i),
+                  connectOnInit: widget.connectOnInit,
+                  fontSize: _terminalFontSize,
+                  themeName: _terminalTheme,
+                  onScalingChanged: (scaling) {
+                    _scalingNotifier.value = scaling;
+                  },
+                );
+              }),
+            ),
+          );
         },
       ),
     );
@@ -330,7 +349,12 @@ class _ConnectionInfoDialogState extends State<_ConnectionInfoDialog> {
   Future<void> _fetch() async {
     try {
       final info = await connectionInfo(port: widget.session.port);
-      if (mounted) setState(() { _irohInfo = info; _irohError = null; });
+      if (mounted) {
+        setState(() {
+          _irohInfo = info;
+          _irohError = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _irohError = e.toString());
     }
@@ -386,7 +410,8 @@ class _ConnectionInfoDialogState extends State<_ConnectionInfoDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text(label,
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
           const SizedBox(height: 2),
           SelectableText(
             value,

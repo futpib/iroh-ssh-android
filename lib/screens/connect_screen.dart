@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/connection_storage.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/session_messages.dart';
+import 'package:iroh_ssh_app/services/session_service.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/screens/settings_screen.dart';
@@ -47,6 +51,41 @@ class _ConnectScreenState extends State<ConnectScreen> {
   void dispose() {
     _targetController.dispose();
     super.dispose();
+  }
+
+  Future<void> _ensureServiceStarted() async {
+    if (!Platform.isAndroid) return;
+
+    final running = await FlutterForegroundTask.isRunningService;
+    if (!running) {
+      FlutterForegroundTask.init(
+        androidNotificationOptions: AndroidNotificationOptions(
+          channelId: 'iroh_ssh_foreground',
+          channelName: 'SSH Session',
+          channelDescription: 'Keeps SSH sessions alive in the background',
+          channelImportance: NotificationChannelImportance.LOW,
+          priority: NotificationPriority.LOW,
+        ),
+        iosNotificationOptions: const IOSNotificationOptions(),
+        foregroundTaskOptions: ForegroundTaskOptions(
+          eventAction: ForegroundTaskEventAction.nothing(),
+          autoRunOnBoot: false,
+          autoRunOnMyPackageReplaced: false,
+          allowWakeLock: true,
+          allowWifiLock: true,
+        ),
+      );
+
+      await FlutterForegroundTask.requestNotificationPermission();
+      await FlutterForegroundTask.startService(
+        notificationTitle: 'iroh-ssh',
+        notificationText: 'Connecting...',
+        notificationButtons: [
+          NotificationButton(id: 'disconnect_all', text: 'Disconnect all'),
+        ],
+        callback: startCallback,
+      );
+    }
   }
 
   Future<void> _connectTo(String target,
@@ -94,40 +133,109 @@ class _ConnectScreenState extends State<ConnectScreen> {
           ? maxRemoteNatTraversalAddresses
           : globalSettings.maxRemoteNatTraversalAddresses;
 
-      final port = await connectIroh(
-        endpointId: endpointId,
-        relayUrls: relayUrls,
-        extraRelayUrls: extraRelayUrls,
-        maxRemoteNatTraversalAddresses: effectiveMaxNat,
-      );
+      if (Platform.isAndroid) {
+        await _ensureServiceStarted();
 
-      await ConnectionStorage.instance.save(SavedConnection(
-        target: target,
-        overrideRelays: overrideRelays,
-        useDefaultRelays: useDefaultRelays,
-        customRelayUrls: customRelayUrls,
-        maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
-      ));
-      await _loadConnections();
+        // Send connect command via IPC and wait for connected event
+        final completer = Completer<SshSessionInfo>();
 
-      if (!mounted) return;
+        void onData(Object data) {
+          if (data is! String) return;
+          try {
+            final event = ServiceEvent.decode(data);
+            if (event is ConnectedEvent) {
+              FlutterForegroundTask.removeTaskDataCallback(onData);
+              if (!completer.isCompleted) {
+                completer.complete(SshSessionInfo(
+                  sessionId: event.sessionId,
+                  host: 'localhost',
+                  port: event.port,
+                  username: event.username,
+                  displayName: event.displayName,
+                ));
+              }
+            } else if (event is ErrorEvent) {
+              FlutterForegroundTask.removeTaskDataCallback(onData);
+              if (!completer.isCompleted) {
+                completer.completeError(Exception(event.message));
+              }
+            }
+          } catch (_) {}
+        }
 
-      final sessionInfo = SshSessionInfo(
-        host: 'localhost',
-        port: port,
-        username: username,
-        identities: keys.map((k) => k.keyPair).toList(),
-        displayName: target,
-      );
+        FlutterForegroundTask.addTaskDataCallback(onData);
+        FlutterForegroundTask.sendDataToTask(ConnectCommand(
+          endpointId: endpointId,
+          username: username,
+          displayName: target,
+          keyNames: keys.map((k) => k.name).toList(),
+          relayUrls: relayUrls,
+          extraRelayUrls: extraRelayUrls,
+          maxRemoteNatTraversalAddresses: effectiveMaxNat,
+        ).encode());
 
-      if (widget.returnResult) {
-        Navigator.of(context).pop(sessionInfo);
+        final sessionInfo = await completer.future;
+
+        await ConnectionStorage.instance.save(SavedConnection(
+          target: target,
+          overrideRelays: overrideRelays,
+          useDefaultRelays: useDefaultRelays,
+          customRelayUrls: customRelayUrls,
+          maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
+        ));
+        await _loadConnections();
+
+        if (!mounted) return;
+
+        if (widget.returnResult) {
+          Navigator.of(context).pop(sessionInfo);
+        } else {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  SessionsScreen(existingSessions: [sessionInfo]),
+            ),
+          );
+        }
       } else {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => SessionsScreen(initialSession: sessionInfo),
-          ),
+        // Non-Android: use direct connection (no foreground service)
+        final port = await _connectDirect(
+          endpointId: endpointId,
+          relayUrls: relayUrls,
+          extraRelayUrls: extraRelayUrls,
+          maxRemoteNatTraversalAddresses: effectiveMaxNat,
         );
+
+        await ConnectionStorage.instance.save(SavedConnection(
+          target: target,
+          overrideRelays: overrideRelays,
+          useDefaultRelays: useDefaultRelays,
+          customRelayUrls: customRelayUrls,
+          maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
+        ));
+        await _loadConnections();
+
+        if (!mounted) return;
+
+        final sessionInfo = SshSessionInfo(
+          sessionId: 'local_${DateTime.now().millisecondsSinceEpoch}',
+          host: 'localhost',
+          port: port,
+          username: username,
+          keyNames: keys.map((k) => k.name).toList(),
+          displayName: target,
+        );
+
+        if (widget.returnResult) {
+          Navigator.of(context).pop(sessionInfo);
+        } else {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  SessionsScreen(existingSessions: [sessionInfo]),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -137,6 +245,20 @@ class _ConnectScreenState extends State<ConnectScreen> {
         setState(() => _connecting = false);
       }
     }
+  }
+
+  Future<int> _connectDirect({
+    required String endpointId,
+    required List<String> relayUrls,
+    required List<String> extraRelayUrls,
+    int? maxRemoteNatTraversalAddresses,
+  }) async {
+    return await connectIroh(
+      endpointId: endpointId,
+      relayUrls: relayUrls,
+      extraRelayUrls: extraRelayUrls,
+      maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
+    );
   }
 
   Future<void> _connect() async {

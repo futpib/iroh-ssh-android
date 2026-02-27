@@ -118,12 +118,14 @@ void main() {
     final tabKey2 = GlobalKey<TerminalTabState>();
 
     final session1 = SshSessionInfo(
+      sessionId: 'test1',
       host: 'localhost',
       port: 10001,
       username: 'user1',
       displayName: 'test1',
     );
     final session2 = SshSessionInfo(
+      sessionId: 'test2',
       host: 'localhost',
       port: 10002,
       username: 'user2',
@@ -189,6 +191,7 @@ void main() {
     final tabKey = GlobalKey<TerminalTabState>();
 
     final session = SshSessionInfo(
+      sessionId: 'test1',
       host: 'localhost',
       port: 10001,
       username: 'user1',

@@ -28,12 +28,14 @@ void main() {
     final tabKey2 = GlobalKey<TerminalTabState>();
 
     final session1 = SshSessionInfo(
+      sessionId: 'test1',
       host: 'localhost',
       port: 10001,
       username: 'user1',
       displayName: 'test1',
     );
     final session2 = SshSessionInfo(
+      sessionId: 'test2',
       host: 'localhost',
       port: 10002,
       username: 'user2',
@@ -104,6 +106,7 @@ void main() {
     SettingsStorage.instance.cache = AppSettings();
 
     final session = SshSessionInfo(
+      sessionId: 'test1',
       host: 'localhost',
       port: 10001,
       username: 'user1',
@@ -113,7 +116,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: SessionsScreen(
-          initialSession: session,
+          existingSessions: [session],
           connectOnInit: false,
         ),
       ),
