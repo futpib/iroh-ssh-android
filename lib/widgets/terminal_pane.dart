@@ -187,6 +187,10 @@ class TerminalPaneState extends State<TerminalPane> {
   static const double _toolbarHeight = 64;
   static const int _fnPageCount = 2;
 
+  void _sendChar(String char) {
+    widget.terminal.textInput(char);
+  }
+
   void _cycleModifier(
     ModifierState current,
     void Function(ModifierState) setter,
@@ -235,7 +239,6 @@ class TerminalPaneState extends State<TerminalPane> {
         _toolbarButton('F4', () => _sendKey(TerminalKey.f4)),
         _toolbarButton('F5', () => _sendKey(TerminalKey.f5)),
         _toolbarButton('F6', () => _sendKey(TerminalKey.f6)),
-        _toolbarButton('', null),
         _repeatableToolbarButton('INS', () => _sendKey(TerminalKey.insert)),
       ];
     }
@@ -244,8 +247,7 @@ class TerminalPaneState extends State<TerminalPane> {
       _modifierButton('SHIFT', _shiftState, () {
         setState(() => _cycleModifier(_shiftState, (s) => _shiftState = s));
       }),
-      _toolbarButton('', null),
-      _toolbarButton('', null),
+      _toolbarButton('/', () => _sendChar('/')),
       _repeatableToolbarButton('HOME', () => _sendKey(TerminalKey.home)),
       _repeatableToolbarButton('↑', () => _sendKey(TerminalKey.arrowUp)),
       _repeatableToolbarButton('END', () => _sendKey(TerminalKey.end)),
@@ -262,7 +264,6 @@ class TerminalPaneState extends State<TerminalPane> {
         _toolbarButton('F10', () => _sendKey(TerminalKey.f10)),
         _toolbarButton('F11', () => _sendKey(TerminalKey.f11)),
         _toolbarButton('F12', () => _sendKey(TerminalKey.f12)),
-        _toolbarButton('', null),
         _repeatableToolbarButton('DEL', () => _sendKey(TerminalKey.delete)),
       ];
     }
@@ -274,7 +275,6 @@ class TerminalPaneState extends State<TerminalPane> {
       _modifierButton('ALT', _altState, () {
         setState(() => _cycleModifier(_altState, (s) => _altState = s));
       }),
-      _toolbarButton('', null),
       _repeatableToolbarButton('←', () => _sendKey(TerminalKey.arrowLeft)),
       _repeatableToolbarButton('↓', () => _sendKey(TerminalKey.arrowDown)),
       _repeatableToolbarButton('→', () => _sendKey(TerminalKey.arrowRight)),
