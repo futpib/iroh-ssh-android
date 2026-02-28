@@ -110,7 +110,7 @@ class _IrohSshAppState extends State<IrohSshApp> {
 
     return MaterialApp(
       navigatorKey: _navigatorKey,
-      title: 'iroh-ssh',
+      title: 'Iroh SSH',
       theme: ThemeData(
         colorSchemeSeed: const Color(0xFF6C5CE7),
         useMaterial3: true,

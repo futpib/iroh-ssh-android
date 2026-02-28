@@ -80,7 +80,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
       await FlutterForegroundTask.requestNotificationPermission();
       await FlutterForegroundTask.startService(
-        notificationTitle: 'iroh-ssh',
+        notificationTitle: 'Iroh SSH',
         notificationText: 'Connecting...',
         notificationButtons: [
           NotificationButton(id: 'disconnect_all', text: 'Disconnect all'),
@@ -404,7 +404,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('iroh-ssh'),
+        title: const Text('Iroh SSH'),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),

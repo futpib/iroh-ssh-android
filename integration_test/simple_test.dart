@@ -8,6 +8,6 @@ void main() {
   setUpAll(() async => await RustLib.init());
   testWidgets('App renders connect screen', (WidgetTester tester) async {
     await tester.pumpWidget(const IrohSshApp());
-    expect(find.text('iroh-ssh'), findsOneWidget);
+    expect(find.text('Iroh SSH'), findsOneWidget);
   });
 }

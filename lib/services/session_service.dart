@@ -258,7 +258,7 @@ class SshSessionService extends TaskHandler {
     final count = _sessions.length;
     if (count > 0) {
       FlutterForegroundTask.updateService(
-        notificationTitle: 'iroh-ssh',
+        notificationTitle: 'Iroh SSH',
         notificationText: '$count active session${count > 1 ? 's' : ''}',
       );
     }
