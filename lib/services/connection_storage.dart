@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:path_provider/path_provider.dart';
 
 class SavedConnection {
   final String target;
+  final ConnectionType connectionType;
   final bool overrideRelays;
   final bool useDefaultRelays;
   final List<String> customRelayUrls;
@@ -12,17 +14,44 @@ class SavedConnection {
 
   SavedConnection({
     required this.target,
+    this.connectionType = ConnectionType.iroh,
     this.overrideRelays = false,
     this.useDefaultRelays = true,
     this.customRelayUrls = const [],
     this.maxRemoteNatTraversalAddresses,
   });
 
-  String get username => target.split('@').first;
-  String get endpointId => target.split('@').skip(1).join('@');
+  String get username {
+    if (connectionType == ConnectionType.local) return '';
+    return target.split('@').first;
+  }
+
+  String get endpointId {
+    if (connectionType != ConnectionType.iroh) return '';
+    return target.split('@').skip(1).join('@');
+  }
+
+  String get sshHost {
+    if (connectionType != ConnectionType.ssh) return '';
+    final afterAt = target.split('@').skip(1).join('@');
+    if (afterAt.contains(':')) {
+      return afterAt.split(':').first;
+    }
+    return afterAt;
+  }
+
+  int get sshPort {
+    if (connectionType != ConnectionType.ssh) return 22;
+    final afterAt = target.split('@').skip(1).join('@');
+    if (afterAt.contains(':')) {
+      return int.tryParse(afterAt.split(':').last) ?? 22;
+    }
+    return 22;
+  }
 
   Map<String, dynamic> toJson() => {
         'target': target,
+        'connectionType': connectionType.name,
         'overrideRelays': overrideRelays,
         'useDefaultRelays': useDefaultRelays,
         'customRelayUrls': customRelayUrls,
@@ -32,10 +61,12 @@ class SavedConnection {
 
   factory SavedConnection.fromJson(Map<String, dynamic> json) {
     final maxNat = json['maxRemoteNatTraversalAddresses'] as int?;
+    final connectionType = _parseConnectionType(json['connectionType'] as String?);
 
     if (json.containsKey('useDefaultRelays')) {
       return SavedConnection(
         target: json['target'] as String,
+        connectionType: connectionType,
         overrideRelays: json['overrideRelays'] as bool? ?? false,
         useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
         customRelayUrls:
@@ -51,6 +82,7 @@ class SavedConnection {
     if (oldRelayUrls.isNotEmpty) {
       return SavedConnection(
         target: json['target'] as String,
+        connectionType: connectionType,
         useDefaultRelays: false,
         customRelayUrls: oldRelayUrls,
         maxRemoteNatTraversalAddresses: maxNat,
@@ -58,10 +90,17 @@ class SavedConnection {
     }
     return SavedConnection(
       target: json['target'] as String,
+      connectionType: connectionType,
       useDefaultRelays: true,
       customRelayUrls: oldExtraRelayUrls,
       maxRemoteNatTraversalAddresses: maxNat,
     );
+  }
+
+  static ConnectionType _parseConnectionType(String? value) {
+    if (value == null) return ConnectionType.iroh;
+    return ConnectionType.values.where((e) => e.name == value).firstOrNull ??
+        ConnectionType.iroh;
   }
 }
 

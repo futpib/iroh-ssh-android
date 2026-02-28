@@ -49,6 +49,7 @@ dependencies:
   local_auth: ^3.0.0
   file_saver: ^0.3.1
   file_picker: ^10.3.10
+  flutter_pty: ^0.4.2
 
 dev_dependencies:
   flutter_test:

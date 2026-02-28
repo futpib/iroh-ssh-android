@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_pty/flutter_pty.dart';
+import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
@@ -57,6 +59,8 @@ class TerminalTabState extends State<TerminalTab>
   // --- Direct mode (non-Android) ---
   SSHClient? _client;
   SSHSession? _session;
+  Pty? _pty;
+  StreamSubscription? _ptyOutputSubscription;
   Completer<String>? _inputCompleter;
   StringBuffer _inputBuffer = StringBuffer();
   bool _inputEcho = true;
@@ -92,7 +96,7 @@ class TerminalTabState extends State<TerminalTab>
         if (_isAndroid) {
           _attachToService();
         } else {
-          _connectSshDirect();
+          _connectDirect();
         }
       });
     }
@@ -234,8 +238,18 @@ class TerminalTabState extends State<TerminalTab>
   }
 
   // =========================================================================
-  // Direct mode (non-Android) — original SSH connection logic
+  // Direct mode (non-Android)
   // =========================================================================
+
+  void _connectDirect() {
+    switch (widget.session.connectionType) {
+      case ConnectionType.iroh:
+      case ConnectionType.ssh:
+        _connectSshDirect();
+      case ConnectionType.local:
+        _connectLocalShellDirect();
+    }
+  }
 
   Future<String> _readLineFromTerminal({bool echo = true}) {
     _inputCompleter = Completer<String>();
@@ -281,6 +295,20 @@ class TerminalTabState extends State<TerminalTab>
     }
 
     _session?.write(utf8.encode(data));
+  }
+
+  void _handleLocalShellTerminalInput(String data) {
+    final paneState = _paneKey.currentState;
+    String toSend = data;
+    if (paneState != null &&
+        (paneState.ctrlActive ||
+            paneState.altActive ||
+            paneState.shiftActive)) {
+      toSend = paneState.applyModifiers(data);
+      paneState.clearModifiers();
+    }
+
+    _pty?.write(utf8.encode(toSend));
   }
 
   void _flushStdout() {
@@ -375,6 +403,46 @@ class TerminalTabState extends State<TerminalTab>
     }
   }
 
+  void _connectLocalShellDirect() {
+    _terminal.onOutput = _handleLocalShellTerminalInput;
+
+    try {
+      _terminal.write('Starting local shell...\r\n');
+
+      final shell = Platform.environment['SHELL'] ?? 'sh';
+      _pty = Pty.start(
+        shell,
+        columns: _terminal.viewWidth,
+        rows: _terminal.viewHeight,
+      );
+
+      _terminal.buffer.clear();
+      _terminal.buffer.setCursor(0, 0);
+
+      _ptyOutputSubscription = _pty!.output.listen((data) {
+        _stdoutBuffer.add(data);
+        _stdoutFlushTimer ??= Timer(_batchDuration, _flushStdout);
+      });
+
+      _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
+        _pty?.resize(height, width);
+      };
+
+      _pty!.exitCode.then((_) {
+        if (mounted) {
+          _disconnectDirect();
+        }
+      });
+
+      setState(() => _connected = true);
+    } catch (e) {
+      _terminal.write('\r\nError: $e\r\n');
+      if (mounted) {
+        setState(() => _authFailed = true);
+      }
+    }
+  }
+
   Future<void> retry() async {
     setState(() => _authFailed = false);
     if (_isAndroid) {
@@ -383,12 +451,20 @@ class TerminalTabState extends State<TerminalTab>
         sessionId: widget.session.sessionId,
       ).encode());
     } else {
-      _client?.close();
-      _client = null;
-      _session = null;
+      _cleanupDirectConnection();
       _terminal.write('\r\n');
-      await _connectSshDirect();
+      _connectDirect();
     }
+  }
+
+  void _cleanupDirectConnection() {
+    _ptyOutputSubscription?.cancel();
+    _ptyOutputSubscription = null;
+    _pty?.kill();
+    _pty = null;
+    _client?.close();
+    _client = null;
+    _session = null;
   }
 
   Future<void> disconnect() async {
@@ -400,9 +476,15 @@ class TerminalTabState extends State<TerminalTab>
   }
 
   Future<void> _disconnectDirect() async {
+    _ptyOutputSubscription?.cancel();
+    _ptyOutputSubscription = null;
+    _pty?.kill();
+    _pty = null;
     _session?.close();
     _client?.close();
-    await disconnectIroh(port: widget.session.port);
+    if (widget.session.connectionType == ConnectionType.iroh) {
+      await disconnectIroh(port: widget.session.port);
+    }
     if (mounted) {
       widget.onDisconnected();
     }
@@ -423,9 +505,11 @@ class TerminalTabState extends State<TerminalTab>
     } else {
       _stdoutFlushTimer?.cancel();
       _stderrFlushTimer?.cancel();
+      _ptyOutputSubscription?.cancel();
+      _pty?.kill();
       _session?.close();
       _client?.close();
-      if (widget.connectOnInit) {
+      if (widget.connectOnInit && widget.session.connectionType == ConnectionType.iroh) {
         disconnectIroh(port: widget.session.port);
       }
     }

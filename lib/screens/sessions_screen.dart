@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/screens/connect_screen.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
@@ -336,8 +337,10 @@ class _ConnectionInfoDialogState extends State<_ConnectionInfoDialog> {
   @override
   void initState() {
     super.initState();
-    _fetch();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _fetch());
+    if (widget.session.connectionType == ConnectionType.iroh) {
+      _fetch();
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) => _fetch());
+    }
   }
 
   @override
@@ -369,29 +372,38 @@ class _ConnectionInfoDialogState extends State<_ConnectionInfoDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _infoRow('Type', session.connectionType.label),
           _infoRow('Target', session.displayName),
-          _infoRow('Username', session.username),
-          _infoRow('Local port', session.port.toString()),
-          if (_irohError != null)
-            _infoRow('Error', _irohError!)
-          else if (_irohInfo == null)
-            _infoRow('Network', 'Waiting for connection...')
-          else ...[
-            _infoRow(
-              'Path',
-              _irohInfo!.isDirect
-                  ? 'Direct'
-                  : _irohInfo!.isRelay
-                      ? 'Relay'
-                      : 'Unknown',
-            ),
-            if (_irohInfo!.relayUrl != null)
-              _infoRow('Relay', _irohInfo!.relayUrl!),
-            if (_irohInfo!.latencyMs != null)
+          if (session.connectionType != ConnectionType.local) ...[
+            _infoRow('Username', session.username),
+          ],
+          if (session.connectionType == ConnectionType.ssh) ...[
+            _infoRow('Host', session.host),
+            _infoRow('Port', session.port.toString()),
+          ],
+          if (session.connectionType == ConnectionType.iroh) ...[
+            _infoRow('Local port', session.port.toString()),
+            if (_irohError != null)
+              _infoRow('Error', _irohError!)
+            else if (_irohInfo == null)
+              _infoRow('Network', 'Waiting for connection...')
+            else ...[
               _infoRow(
-                'Latency',
-                '${_irohInfo!.latencyMs!.toStringAsFixed(1)} ms',
+                'Path',
+                _irohInfo!.isDirect
+                    ? 'Direct'
+                    : _irohInfo!.isRelay
+                        ? 'Relay'
+                        : 'Unknown',
               ),
+              if (_irohInfo!.relayUrl != null)
+                _infoRow('Relay', _irohInfo!.relayUrl!),
+              if (_irohInfo!.latencyMs != null)
+                _infoRow(
+                  'Latency',
+                  '${_irohInfo!.latencyMs!.toStringAsFixed(1)} ms',
+                ),
+            ],
           ],
         ],
       ),

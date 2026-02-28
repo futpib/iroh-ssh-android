@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter_pty/flutter_pty.dart';
+import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/terminal_replay_buffer.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
@@ -15,15 +18,21 @@ class BackgroundSession {
   final String username;
   int port;
   final List<SSHKeyPair> identities;
+  final ConnectionType connectionType;
 
   /// Connection parameters needed for reconnection.
-  final String endpointId;
+  final String? endpointId;
   final List<String> relayUrls;
   final List<String> extraRelayUrls;
   final int? maxRemoteNatTraversalAddresses;
 
+  /// Direct SSH connection parameters.
+  final String? sshHost;
+  final int? sshPort;
+
   SSHClient? _client;
   SSHSession? _session;
+  Pty? _pty;
   SessionState state = SessionState.connecting;
   final TerminalReplayBuffer replayBuffer = TerminalReplayBuffer();
   bool uiAttached = false;
@@ -47,24 +56,43 @@ class BackgroundSession {
   final _stderrBuffer = BytesBuilder(copy: false);
   Timer? _stderrFlushTimer;
 
+  StreamSubscription? _ptyOutputSubscription;
+
   BackgroundSession({
     required this.sessionId,
     required this.displayName,
     required this.username,
     required this.port,
     required this.identities,
-    required this.endpointId,
-    required this.relayUrls,
-    required this.extraRelayUrls,
+    this.connectionType = ConnectionType.iroh,
+    this.endpointId,
+    this.relayUrls = const [],
+    this.extraRelayUrls = const [],
     this.maxRemoteNatTraversalAddresses,
+    this.sshHost,
+    this.sshPort,
   });
 
   Future<void> connect() async {
+    switch (connectionType) {
+      case ConnectionType.iroh:
+      case ConnectionType.ssh:
+        await _connectSsh();
+      case ConnectionType.local:
+        _connectLocalShell();
+    }
+  }
+
+  Future<void> _connectSsh() async {
     state = SessionState.connecting;
-    _sendStatus('Connecting to localhost:$port...');
+    final connectHost =
+        connectionType == ConnectionType.ssh ? sshHost! : 'localhost';
+    final connectPort =
+        connectionType == ConnectionType.ssh ? (sshPort ?? 22) : port;
+    _sendStatus('Connecting to $connectHost:$connectPort...');
 
     try {
-      final socket = await SSHSocket.connect('localhost', port);
+      final socket = await SSHSocket.connect(connectHost, connectPort);
 
       _client = SSHClient(
         socket,
@@ -116,8 +144,34 @@ class BackgroundSession {
       final bytes = utf8.encode(errorMsg);
       replayBuffer.write(bytes);
       _forwardOutput(bytes);
-      // Set state to disconnected but don't send DisconnectedEvent —
-      // the UI will show a retry button via the ErrorEvent instead.
+      state = SessionState.disconnected;
+      _sendError(e.toString());
+    }
+  }
+
+  void _connectLocalShell() {
+    state = SessionState.connecting;
+    _sendStatus('Starting local shell...');
+
+    try {
+      final shell = Platform.environment['SHELL'] ?? 'sh';
+      _pty = Pty.start(shell, columns: 80, rows: 24);
+
+      state = SessionState.connected;
+
+      _ptyOutputSubscription = _pty!.output.listen((data) {
+        _stdoutBuffer.add(data);
+        _stdoutFlushTimer ??= Timer(_batchDuration, _flushStdout);
+      });
+
+      _pty!.exitCode.then((_) {
+        disconnect(reason: 'Shell exited');
+      });
+    } catch (e) {
+      final errorMsg = '\r\nError: $e\r\n';
+      final bytes = utf8.encode(errorMsg);
+      replayBuffer.write(bytes);
+      _forwardOutput(bytes);
       state = SessionState.disconnected;
       _sendError(e.toString());
     }
@@ -187,11 +241,19 @@ class BackgroundSession {
   }
 
   void handleInput(Uint8List data) {
-    _session?.write(data);
+    if (connectionType == ConnectionType.local) {
+      _pty?.write(data);
+    } else {
+      _session?.write(data);
+    }
   }
 
   void handleResize(int width, int height) {
-    _session?.resizeTerminal(width, height);
+    if (connectionType == ConnectionType.local) {
+      _pty?.resize(height, width);
+    } else {
+      _session?.resizeTerminal(width, height);
+    }
   }
 
   void onAttach() {
@@ -213,7 +275,11 @@ class BackgroundSession {
   }
 
   Future<void> reconnect() async {
-    // Clean up old SSH connection
+    // Clean up old connection
+    _ptyOutputSubscription?.cancel();
+    _ptyOutputSubscription = null;
+    _pty?.kill();
+    _pty = null;
     _session?.close();
     _client?.close();
     _session = null;
@@ -227,21 +293,25 @@ class BackgroundSession {
     }
     _pendingAuthPrompts.clear();
 
-    // Clean up old iroh tunnel
-    try {
-      await disconnectIroh(port: port);
-    } catch (_) {}
+    if (connectionType == ConnectionType.iroh) {
+      // Clean up old iroh tunnel
+      try {
+        await disconnectIroh(port: port);
+      } catch (_) {}
 
-    // Establish new iroh tunnel
-    _sendStatus('Reconnecting...');
-    port = await connectIroh(
-      endpointId: endpointId,
-      relayUrls: relayUrls,
-      extraRelayUrls: extraRelayUrls,
-      maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
-    );
+      // Establish new iroh tunnel
+      _sendStatus('Reconnecting...');
+      port = await connectIroh(
+        endpointId: endpointId!,
+        relayUrls: relayUrls,
+        extraRelayUrls: extraRelayUrls,
+        maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
+      );
+    } else {
+      _sendStatus('Reconnecting...');
+    }
 
-    // Start SSH over new tunnel
+    // Start connection
     await connect();
   }
 
@@ -250,12 +320,18 @@ class BackgroundSession {
     state = SessionState.disconnected;
     _stdoutFlushTimer?.cancel();
     _stderrFlushTimer?.cancel();
+    _ptyOutputSubscription?.cancel();
+    _ptyOutputSubscription = null;
+    _pty?.kill();
+    _pty = null;
     _session?.close();
     _client?.close();
-    try {
-      await disconnectIroh(port: port);
-    } catch (_) {
-      // Port may already be cleaned up
+    if (connectionType == ConnectionType.iroh) {
+      try {
+        await disconnectIroh(port: port);
+      } catch (_) {
+        // Port may already be cleaned up
+      }
     }
     if (uiAttached && onSendToUi != null) {
       onSendToUi!(

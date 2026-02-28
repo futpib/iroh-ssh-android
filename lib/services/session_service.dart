@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/services/background_session.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
@@ -59,54 +60,107 @@ class SshSessionService extends TaskHandler {
     final sessionId = 'session_${_sessionCounter++}';
 
     try {
-      final keys = await KeyStorage.instance.listKeys();
-      final requestedKeyNames = command.keyNames.toSet();
-      final identities = keys
-          .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
-          .map((k) => k.keyPair)
-          .toList();
-
-      final port = await connectIroh(
-        endpointId: command.endpointId,
-        relayUrls: command.relayUrls,
-        extraRelayUrls: command.extraRelayUrls,
-        maxRemoteNatTraversalAddresses: command.maxRemoteNatTraversalAddresses,
-      );
-
-      final session = BackgroundSession(
-        sessionId: sessionId,
-        displayName: command.displayName,
-        username: command.username,
-        port: port,
-        identities: identities,
-        endpointId: command.endpointId,
-        relayUrls: command.relayUrls,
-        extraRelayUrls: command.extraRelayUrls,
-        maxRemoteNatTraversalAddresses: command.maxRemoteNatTraversalAddresses,
-      );
-
-      session.onSendToUi = _sendToUi;
-      session.onSessionEnded = () => _removeSession(sessionId);
-      session.uiAttached = true;
-      _sessions[sessionId] = session;
-
-      _sendToUi(ConnectedEvent(
-        sessionId: sessionId,
-        displayName: command.displayName,
-        username: command.username,
-        port: port,
-      ).encode());
-
-      _updateNotification();
-
-      // Start SSH connection asynchronously
-      session.connect();
+      switch (command.connectionType) {
+        case ConnectionType.iroh:
+          await _handleConnectIroh(sessionId, command);
+        case ConnectionType.ssh:
+          await _handleConnectSsh(sessionId, command);
+        case ConnectionType.local:
+          await _handleConnectLocalShell(sessionId, command);
+      }
     } catch (e) {
       _sendToUi(ErrorEvent(
         sessionId: sessionId,
         message: e.toString(),
       ).encode());
     }
+  }
+
+  Future<void> _handleConnectIroh(String sessionId, ConnectCommand command) async {
+    final keys = await KeyStorage.instance.listKeys();
+    final requestedKeyNames = command.keyNames.toSet();
+    final identities = keys
+        .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
+        .map((k) => k.keyPair)
+        .toList();
+
+    final port = await connectIroh(
+      endpointId: command.endpointId!,
+      relayUrls: command.relayUrls,
+      extraRelayUrls: command.extraRelayUrls,
+      maxRemoteNatTraversalAddresses: command.maxRemoteNatTraversalAddresses,
+    );
+
+    final session = BackgroundSession(
+      sessionId: sessionId,
+      displayName: command.displayName,
+      username: command.username,
+      port: port,
+      identities: identities,
+      connectionType: ConnectionType.iroh,
+      endpointId: command.endpointId,
+      relayUrls: command.relayUrls,
+      extraRelayUrls: command.extraRelayUrls,
+      maxRemoteNatTraversalAddresses: command.maxRemoteNatTraversalAddresses,
+    );
+
+    _startSession(sessionId, session, command);
+  }
+
+  Future<void> _handleConnectSsh(String sessionId, ConnectCommand command) async {
+    final keys = await KeyStorage.instance.listKeys();
+    final requestedKeyNames = command.keyNames.toSet();
+    final identities = keys
+        .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
+        .map((k) => k.keyPair)
+        .toList();
+
+    final session = BackgroundSession(
+      sessionId: sessionId,
+      displayName: command.displayName,
+      username: command.username,
+      port: command.sshPort ?? 22,
+      identities: identities,
+      connectionType: ConnectionType.ssh,
+      sshHost: command.host,
+      sshPort: command.sshPort ?? 22,
+    );
+
+    _startSession(sessionId, session, command);
+  }
+
+  Future<void> _handleConnectLocalShell(String sessionId, ConnectCommand command) async {
+    final session = BackgroundSession(
+      sessionId: sessionId,
+      displayName: command.displayName,
+      username: command.username,
+      port: 0,
+      identities: [],
+      connectionType: ConnectionType.local,
+    );
+
+    _startSession(sessionId, session, command);
+  }
+
+  void _startSession(String sessionId, BackgroundSession session, ConnectCommand command) {
+    session.onSendToUi = _sendToUi;
+    session.onSessionEnded = () => _removeSession(sessionId);
+    session.uiAttached = true;
+    _sessions[sessionId] = session;
+
+    _sendToUi(ConnectedEvent(
+      sessionId: sessionId,
+      displayName: command.displayName,
+      username: command.username,
+      port: session.port,
+      connectionType: command.connectionType,
+      host: command.host,
+    ).encode());
+
+    _updateNotification();
+
+    // Start connection asynchronously
+    session.connect();
   }
 
   Future<void> _handleReconnect(ReconnectCommand command) async {

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:iroh_ssh_app/models/connection_type.dart';
+
 // ---------------------------------------------------------------------------
 // UI → Service messages
 // ---------------------------------------------------------------------------
@@ -27,28 +29,35 @@ sealed class ServiceCommand {
 }
 
 class ConnectCommand extends ServiceCommand {
-  final String endpointId;
+  final ConnectionType connectionType;
+  final String? endpointId;
   final String username;
   final String displayName;
   final List<String> keyNames;
   final List<String> relayUrls;
   final List<String> extraRelayUrls;
   final int? maxRemoteNatTraversalAddresses;
+  final String? host;
+  final int? sshPort;
 
   ConnectCommand({
-    required this.endpointId,
+    this.connectionType = ConnectionType.iroh,
+    this.endpointId,
     required this.username,
     required this.displayName,
     required this.keyNames,
     required this.relayUrls,
     required this.extraRelayUrls,
     this.maxRemoteNatTraversalAddresses,
+    this.host,
+    this.sshPort,
   });
 
   @override
   Map<String, dynamic> toJson() => {
         'type': 'connect',
-        'endpointId': endpointId,
+        'connectionType': connectionType.name,
+        if (endpointId != null) 'endpointId': endpointId,
         'username': username,
         'displayName': displayName,
         'keyNames': keyNames,
@@ -56,10 +65,13 @@ class ConnectCommand extends ServiceCommand {
         'extraRelayUrls': extraRelayUrls,
         if (maxRemoteNatTraversalAddresses != null)
           'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
+        if (host != null) 'host': host,
+        if (sshPort != null) 'sshPort': sshPort,
       };
 
   factory ConnectCommand.fromJson(Map<String, dynamic> json) => ConnectCommand(
-        endpointId: json['endpointId'] as String,
+        connectionType: _parseConnectionType(json['connectionType'] as String?),
+        endpointId: json['endpointId'] as String?,
         username: json['username'] as String,
         displayName: json['displayName'] as String,
         keyNames: (json['keyNames'] as List).cast<String>(),
@@ -67,7 +79,15 @@ class ConnectCommand extends ServiceCommand {
         extraRelayUrls: (json['extraRelayUrls'] as List).cast<String>(),
         maxRemoteNatTraversalAddresses:
             json['maxRemoteNatTraversalAddresses'] as int?,
+        host: json['host'] as String?,
+        sshPort: json['sshPort'] as int?,
       );
+
+  static ConnectionType _parseConnectionType(String? value) {
+    if (value == null) return ConnectionType.iroh;
+    return ConnectionType.values.where((e) => e.name == value).firstOrNull ??
+        ConnectionType.iroh;
+  }
 }
 
 class DisconnectCommand extends ServiceCommand {
@@ -232,12 +252,16 @@ class ConnectedEvent extends ServiceEvent {
   final String displayName;
   final String username;
   final int port;
+  final ConnectionType connectionType;
+  final String? host;
 
   ConnectedEvent({
     required this.sessionId,
     required this.displayName,
     required this.username,
     required this.port,
+    this.connectionType = ConnectionType.iroh,
+    this.host,
   });
 
   @override
@@ -247,6 +271,8 @@ class ConnectedEvent extends ServiceEvent {
         'displayName': displayName,
         'username': username,
         'port': port,
+        'connectionType': connectionType.name,
+        if (host != null) 'host': host,
       };
 
   factory ConnectedEvent.fromJson(Map<String, dynamic> json) => ConnectedEvent(
@@ -254,7 +280,15 @@ class ConnectedEvent extends ServiceEvent {
         displayName: json['displayName'] as String,
         username: json['username'] as String,
         port: json['port'] as int,
+        connectionType: _parseConnectionType(json['connectionType'] as String?),
+        host: json['host'] as String?,
       );
+
+  static ConnectionType _parseConnectionType(String? value) {
+    if (value == null) return ConnectionType.iroh;
+    return ConnectionType.values.where((e) => e.name == value).firstOrNull ??
+        ConnectionType.iroh;
+  }
 }
 
 class DisconnectedEvent extends ServiceEvent {

@@ -1,3 +1,5 @@
+import 'package:iroh_ssh_app/models/connection_type.dart';
+
 class SshSessionInfo {
   final String sessionId;
   final String host;
@@ -5,6 +7,7 @@ class SshSessionInfo {
   final String username;
   final List<String> keyNames;
   final String displayName;
+  final ConnectionType connectionType;
 
   const SshSessionInfo({
     required this.sessionId,
@@ -13,6 +16,7 @@ class SshSessionInfo {
     required this.username,
     this.keyNames = const [],
     required this.displayName,
+    this.connectionType = ConnectionType.iroh,
   });
 
   Map<String, dynamic> toJson() => {
@@ -22,6 +26,7 @@ class SshSessionInfo {
         'username': username,
         'keyNames': keyNames,
         'displayName': displayName,
+        'connectionType': connectionType.name,
       };
 
   factory SshSessionInfo.fromJson(Map<String, dynamic> json) => SshSessionInfo(
@@ -31,5 +36,12 @@ class SshSessionInfo {
         username: json['username'] as String,
         keyNames: (json['keyNames'] as List?)?.cast<String>() ?? [],
         displayName: json['displayName'] as String,
+        connectionType: _parseConnectionType(json['connectionType'] as String?),
       );
+
+  static ConnectionType _parseConnectionType(String? value) {
+    if (value == null) return ConnectionType.iroh;
+    return ConnectionType.values.where((e) => e.name == value).firstOrNull ??
+        ConnectionType.iroh;
+  }
 }
