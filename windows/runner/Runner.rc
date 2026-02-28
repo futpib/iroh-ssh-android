@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.github.futpib" "\0"
-            VALUE "FileDescription", "iroh_ssh_app" "\0"
+            VALUE "FileDescription", "Iroh SSH" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "iroh_ssh_app" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.github.futpib. All rights reserved." "\0"
             VALUE "OriginalFilename", "iroh_ssh_app.exe" "\0"
-            VALUE "ProductName", "iroh_ssh_app" "\0"
+            VALUE "ProductName", "Iroh SSH" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

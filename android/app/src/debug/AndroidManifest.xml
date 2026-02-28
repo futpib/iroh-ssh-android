@@ -5,5 +5,5 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
-    <application android:label="iroh_ssh_app (debug)" tools:replace="android:label" />
+    <application android:label="Iroh SSH (debug)" tools:replace="android:label" />
 </manifest>

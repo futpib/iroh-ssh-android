@@ -96,7 +96,7 @@ class _IrohSshAppState extends State<IrohSshApp> {
   Widget build(BuildContext context) {
     if (!_checked) {
       return MaterialApp(
-        title: 'iroh-ssh',
+        title: 'Iroh SSH',
         theme: ThemeData(
           colorSchemeSeed: const Color(0xFF6C5CE7),
           useMaterial3: true,
