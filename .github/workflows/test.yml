@@ -47,5 +47,8 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Run integration tests
-        run: xvfb-run flutter test integration_test/ -d linux
+      - name: Run integration tests (simple)
+        run: xvfb-run flutter test integration_test/simple_test.dart -d linux
+
+      - name: Run integration tests (local shell)
+        run: xvfb-run flutter test integration_test/local_shell_test.dart -d linux
