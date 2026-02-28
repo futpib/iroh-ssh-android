@@ -43,8 +43,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RELEASE_COUNT=$(gh release list --repo "${{ github.repository }}" --limit 10000 --json tagName --jq 'length' 2>/dev/null || echo "0")
-          BUILD_NUMBER=$((RELEASE_COUNT + 1))
+          PREV_CODE=$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null | grep -oP '\+\K\d+$' || echo "9")
+          BUILD_NUMBER=$((PREV_CODE + 1))
           echo "name=$(date -u +'%y.%m.%d.%H.%M')" >> "$GITHUB_OUTPUT"
           echo "code=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
@@ -56,7 +56,7 @@ jobs:
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.name }}
-          name: ${{ steps.version.outputs.name }}
+          tag_name: ${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}
+          name: ${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}
           body: Built from ${{ github.sha }}.
           files: build/app/outputs/flutter-apk/app-release.apk
