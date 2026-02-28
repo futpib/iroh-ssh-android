@@ -2,6 +2,8 @@
 
 An Android SSH client powered by [iroh](https://iroh.computer/) for peer-to-peer connections.
 
+[![Get it on Obtainium](https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png)](https://apps.obtainium.imranr.dev/redirect.html?r=obtainium://add/https://github.com/futpib/iroh-ssh-android)
+
 ## Overview
 
 iroh-ssh lets you open SSH sessions to remote hosts over the iroh peer-to-peer network.
