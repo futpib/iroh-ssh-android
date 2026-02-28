@@ -1,4 +1,4 @@
-package com.example.iroh_ssh_app
+package com.github.futpib.iroh_ssh_app
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 

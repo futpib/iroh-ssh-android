@@ -8,7 +8,7 @@
 PRODUCT_NAME = iroh_ssh_app
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.irohSshApp
+PRODUCT_BUNDLE_IDENTIFIER = com.github.futpib.irohSshApp
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.github.futpib. All rights reserved.
