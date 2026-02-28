@@ -32,6 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   double _terminalFontSize = 14.0;
   String _terminalTheme = 'default';
+  String _barPosition = 'bottom';
   bool _terminalLoading = true;
 
   @override
@@ -345,6 +346,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         _relaysLoading = false;
         _terminalFontSize = settings.terminalFontSize;
         _terminalTheme = settings.terminalTheme;
+        _barPosition = settings.barPosition;
         _terminalLoading = false;
       });
     }
@@ -357,6 +359,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
       terminalFontSize: _terminalFontSize,
       terminalTheme: _terminalTheme,
+      barPosition: _barPosition,
     ));
   }
 
@@ -367,6 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
       terminalFontSize: _terminalFontSize,
       terminalTheme: _terminalTheme,
+      barPosition: _barPosition,
     ));
   }
 
@@ -477,6 +481,31 @@ class _SettingsScreenState extends State<SettingsScreen>
                 RadioListTile<String>(
                   title: const Text('White on Black'),
                   value: 'whiteOnBlack',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Bar Position',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          RadioGroup<String>(
+            groupValue: _barPosition,
+            onChanged: (value) {
+              setState(() => _barPosition = value!);
+              _saveTerminalSettings();
+            },
+            child: Column(
+              children: [
+                RadioListTile<String>(
+                  title: const Text('Bottom'),
+                  value: 'bottom',
+                ),
+                RadioListTile<String>(
+                  title: const Text('Top'),
+                  value: 'top',
                 ),
               ],
             ),

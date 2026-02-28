@@ -28,6 +28,7 @@ class TerminalPane extends StatefulWidget {
   final TerminalTheme theme;
   final ValueChanged<double>? onFontSizeChanged;
   final ValueChanged<bool>? onScalingChanged;
+  final ValueChanged<double>? onVerticalScrollDelta;
 
   const TerminalPane({
     super.key,
@@ -38,6 +39,7 @@ class TerminalPane extends StatefulWidget {
     this.theme = TerminalThemes.defaultTheme,
     this.onFontSizeChanged,
     this.onScalingChanged,
+    this.onVerticalScrollDelta,
   });
 
   @override
@@ -59,6 +61,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   int? _scrollPointerId;
   double? _scrollPointerStartY;
   double _scrollStartOffset = 0;
+  double? _lastScrollPointerY;
   VelocityTracker? _velocityTracker;
   AnimationController? _flingController;
   final ScrollController _scrollController = ScrollController();
@@ -456,6 +459,25 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                 removeTop: true,
                 removeBottom: true,
                 child: Listener(
+                  onPointerSignal: (event) {
+                    if (event is PointerScrollEvent) {
+                      final viewHeight = widget.terminal.viewHeight;
+                      final cellHeight = viewHeight > 0 && _terminalHeight != null
+                          ? _terminalHeight! / viewHeight
+                          : _currentFontSize * 1.2;
+                      final lines = 3;
+                      final delta = event.scrollDelta.dy.sign * cellHeight * lines;
+                      if (_scrollController.hasClients) {
+                        final target =
+                            (_scrollController.offset + delta).clamp(
+                          0.0,
+                          _scrollController.position.maxScrollExtent,
+                        );
+                        _scrollController.jumpTo(target);
+                      }
+                      widget.onVerticalScrollDelta?.call(delta);
+                    }
+                  },
                   onPointerDown: (event) {
                     _pointerPositions[event.pointer] = event.position;
                     _flingController?.stop();
@@ -467,6 +489,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                           : 0;
                       _velocityTracker = VelocityTracker.withKind(event.kind);
                       _velocityTracker!.addPosition(event.timeStamp, event.position);
+                      _lastScrollPointerY = event.position.dy;
                     }
                     if (_pointerPositions.length >= 2 && !_isScaling) {
                       _isScaling = true;
@@ -505,6 +528,15 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                         );
                         _scrollController.jumpTo(target);
                       }
+                      if (_lastScrollPointerY != null) {
+                        final delta = _lastScrollPointerY! - event.position.dy;
+                        if (delta.abs() > 1.0) {
+                          widget.onVerticalScrollDelta?.call(delta);
+                          _lastScrollPointerY = event.position.dy;
+                        }
+                      } else {
+                        _lastScrollPointerY = event.position.dy;
+                      }
                     }
                   },
                   onPointerUp: (event) {
@@ -512,6 +544,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                     if (event.pointer == _scrollPointerId) {
                       _startFling();
                       _scrollPointerId = null;
+                      _lastScrollPointerY = null;
                     }
                     if (_pointerPositions.length < 2 && _isScaling) {
                       _isScaling = false;

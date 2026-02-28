@@ -21,6 +21,7 @@ class TerminalTab extends StatefulWidget {
   final double fontSize;
   final String themeName;
   final ValueChanged<bool>? onScalingChanged;
+  final ValueChanged<double>? onVerticalScrollDelta;
 
   @visibleForTesting
   final bool connectOnInit;
@@ -33,6 +34,7 @@ class TerminalTab extends StatefulWidget {
     this.themeName = 'default',
     this.connectOnInit = true,
     this.onScalingChanged,
+    this.onVerticalScrollDelta,
   });
 
   @override
@@ -535,6 +537,7 @@ class TerminalTabState extends State<TerminalTab>
             setState(() => _fontSize = newSize);
           },
           onScalingChanged: widget.onScalingChanged,
+          onVerticalScrollDelta: widget.onVerticalScrollDelta,
         ),
         if (_authFailed)
           Positioned(

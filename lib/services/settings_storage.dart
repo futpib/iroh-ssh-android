@@ -10,6 +10,7 @@ class AppSettings {
   final int? maxRemoteNatTraversalAddresses;
   final double terminalFontSize;
   final String terminalTheme;
+  final String barPosition;
 
   AppSettings({
     this.useDefaultRelays = true,
@@ -17,6 +18,7 @@ class AppSettings {
     this.maxRemoteNatTraversalAddresses,
     this.terminalFontSize = 14.0,
     this.terminalTheme = 'default',
+    this.barPosition = 'bottom',
   });
 
   Map<String, dynamic> toJson() => {
@@ -26,6 +28,7 @@ class AppSettings {
           'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
         'terminalFontSize': terminalFontSize,
         'terminalTheme': terminalTheme,
+        'barPosition': barPosition,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -33,6 +36,7 @@ class AppSettings {
     final terminalFontSize =
         (json['terminalFontSize'] as num?)?.toDouble() ?? 14.0;
     final terminalTheme = json['terminalTheme'] as String? ?? 'default';
+    final barPosition = json['barPosition'] as String? ?? 'bottom';
 
     // Backwards compat: migrate old relayUrls/extraRelayUrls
     if (json.containsKey('useDefaultRelays')) {
@@ -43,6 +47,7 @@ class AppSettings {
         maxRemoteNatTraversalAddresses: maxNat,
         terminalFontSize: terminalFontSize,
         terminalTheme: terminalTheme,
+        barPosition: barPosition,
       );
     }
     final oldRelayUrls =
@@ -56,6 +61,7 @@ class AppSettings {
         maxRemoteNatTraversalAddresses: maxNat,
         terminalFontSize: terminalFontSize,
         terminalTheme: terminalTheme,
+        barPosition: barPosition,
       );
     }
     return AppSettings(
@@ -64,6 +70,7 @@ class AppSettings {
       maxRemoteNatTraversalAddresses: maxNat,
       terminalFontSize: terminalFontSize,
       terminalTheme: terminalTheme,
+      barPosition: barPosition,
     );
   }
 }

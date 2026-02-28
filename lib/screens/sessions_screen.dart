@@ -37,6 +37,8 @@ class _SessionsScreenState extends State<SessionsScreen>
   final Map<String, GlobalKey<TerminalTabState>> _tabKeys = {};
   double _terminalFontSize = 14.0;
   String _terminalTheme = 'default';
+  String _barPosition = 'bottom';
+  double _barHideOffset = 0.0;
   final ValueNotifier<bool> _scalingNotifier = ValueNotifier(false);
   void Function(Object)? _serviceDataCallback;
 
@@ -98,6 +100,7 @@ class _SessionsScreenState extends State<SessionsScreen>
       setState(() {
         _terminalFontSize = settings.terminalFontSize;
         _terminalTheme = settings.terminalTheme;
+        _barPosition = settings.barPosition;
       });
     }
   }
@@ -106,7 +109,7 @@ class _SessionsScreenState extends State<SessionsScreen>
     if (!_tabController.indexIsChanging) {
       final session = _sessions[_tabController.index];
       final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
-      if (keyboardOpen) {
+      if (keyboardOpen || !_isAndroid) {
         _tabKeys[session.sessionId]?.currentState?.requestFocus();
       }
       setState(() {});
@@ -226,13 +229,123 @@ class _SessionsScreenState extends State<SessionsScreen>
     return confirmed ?? false;
   }
 
+  Widget _buildBar(bool keyboardOpen) {
+    if (_sessions.isEmpty) return const SizedBox.shrink();
+    final currentSession = _sessions[_tabController.index];
+    final theme = Theme.of(context);
+    final appBarTheme = AppBarTheme.of(context);
+    final backgroundColor =
+        appBarTheme.backgroundColor ?? theme.colorScheme.surface;
+    final foregroundColor =
+        appBarTheme.foregroundColor ?? theme.colorScheme.onSurface;
+
+    return Material(
+      color: backgroundColor,
+      elevation: appBarTheme.elevation ?? 4,
+      child: SafeArea(
+        top: _barPosition == 'top',
+        bottom: _barPosition == 'bottom',
+        child: SizedBox(
+          height: kToolbarHeight,
+          child: Row(
+            children: [
+              const SizedBox(width: 4),
+              IconButton(
+                icon: Icon(Icons.arrow_back, color: foregroundColor),
+                onPressed: () async {
+                  if (await _onWillPop()) {
+                    if (mounted) {
+                      Navigator.of(context).pop();
+                    }
+                  }
+                },
+              ),
+              Expanded(
+                child: Text(
+                  currentSession.displayName,
+                  style: (appBarTheme.titleTextStyle ??
+                          theme.textTheme.titleLarge)
+                      ?.copyWith(color: foregroundColor),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.info_outline, color: foregroundColor),
+                onPressed: () => _showConnectionInfo(currentSession),
+                tooltip: 'Connection info',
+              ),
+              if (_sessions.length > 1)
+                _buildTabCountButton(foregroundColor),
+              IconButton(
+                icon: Icon(Icons.add, color: foregroundColor),
+                onPressed: _addSession,
+                tooltip: 'New connection',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabCountButton(Color foregroundColor) {
+    return IconButton(
+      tooltip: 'Tabs',
+      onPressed: _showTabOverview,
+      icon: Container(
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: foregroundColor, width: 2),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${_sessions.length}',
+          style: TextStyle(
+            color: foregroundColor,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showTabOverview() async {
+    final tabState = _tabKeys[_sessions[_tabController.index].sessionId]?.currentState;
+    tabState?.disableFocus();
+    final result = await showDialog<_TabAction>(
+      context: context,
+      builder: (ctx) => _TabOverviewDialog(
+        sessions: _sessions,
+        currentIndex: _tabController.index,
+      ),
+    );
+    tabState?.enableFocus();
+    if (result == null) return;
+    switch (result.action) {
+      case 'switch':
+        _tabController.animateTo(result.index);
+      case 'close':
+        _closeSession(result.index);
+    }
+  }
+
+
+  double _computeBarHeight() {
+    final mediaQuery = MediaQuery.of(context);
+    final safePadding = _barPosition == 'top'
+        ? mediaQuery.padding.top
+        : mediaQuery.padding.bottom;
+    return kToolbarHeight + safePadding;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_sessions.isEmpty) {
       return const SizedBox.shrink();
     }
-
-    final currentSession = _sessions[_tabController.index];
 
     final scaffold = PopScope(
       canPop: false,
@@ -247,66 +360,62 @@ class _SessionsScreenState extends State<SessionsScreen>
       child: Builder(
         builder: (context) {
           final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+          final isTop = _barPosition == 'top';
+          final barHeight = keyboardOpen ? 0.0 : _computeBarHeight();
+          final clampedOffset = _barHideOffset.clamp(0.0, barHeight);
+          final barShift = keyboardOpen ? barHeight : clampedOffset;
+          final terminalShift = isTop
+              ? barHeight - barShift
+              : -(barHeight - barShift);
+
+          final terminalView = TabBarView(
+            controller: _tabController,
+            physics: ScaleAwareScrollPhysics(_scalingNotifier),
+            children: List.generate(_sessions.length, (i) {
+              final session = _sessions[i];
+              return TerminalTab(
+                key: _tabKeys[session.sessionId],
+                session: session,
+                onDisconnected: () => _closeSession(i),
+                connectOnInit: widget.connectOnInit,
+                fontSize: _terminalFontSize,
+                themeName: _terminalTheme,
+                onScalingChanged: (scaling) {
+                  _scalingNotifier.value = scaling;
+                },
+                onVerticalScrollDelta: (delta) {
+                  setState(() {
+                    _barHideOffset = (_barHideOffset - delta).clamp(0.0, barHeight);
+                  });
+                },
+              );
+            }),
+          );
+
+          final barWidget = _buildBar(keyboardOpen);
+
           return Scaffold(
             resizeToAvoidBottomInset: false,
-            appBar: keyboardOpen
-                ? null
-                : AppBar(
-                    title: Text(currentSession.displayName),
-                    actions: [
-                      IconButton(
-                        icon: const Icon(Icons.info_outline),
-                        onPressed: () =>
-                            _showConnectionInfo(currentSession),
-                        tooltip: 'Connection info',
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add),
-                        onPressed: _addSession,
-                        tooltip: 'New connection',
-                      ),
-                    ],
-                    bottom: _sessions.length > 1
-                        ? TabBar(
-                            controller: _tabController,
-                            isScrollable: true,
-                            tabs: List.generate(_sessions.length, (i) {
-                              final session = _sessions[i];
-                              return Tab(
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(session.username),
-                                    const SizedBox(width: 4),
-                                    GestureDetector(
-                                      onTap: () => _closeSession(i),
-                                      child:
-                                          const Icon(Icons.close, size: 16),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
-                          )
-                        : null,
+            body: Stack(
+              children: [
+                Positioned.fill(
+                  child: Transform.translate(
+                    offset: Offset(0, terminalShift),
+                    child: terminalView,
                   ),
-            body: TabBarView(
-              controller: _tabController,
-              physics: ScaleAwareScrollPhysics(_scalingNotifier),
-              children: List.generate(_sessions.length, (i) {
-                final session = _sessions[i];
-                return TerminalTab(
-                  key: _tabKeys[session.sessionId],
-                  session: session,
-                  onDisconnected: () => _closeSession(i),
-                  connectOnInit: widget.connectOnInit,
-                  fontSize: _terminalFontSize,
-                  themeName: _terminalTheme,
-                  onScalingChanged: (scaling) {
-                    _scalingNotifier.value = scaling;
-                  },
-                );
-              }),
+                ),
+                if (!keyboardOpen)
+                  Positioned(
+                    top: isTop ? 0 : null,
+                    bottom: isTop ? null : 0,
+                    left: 0,
+                    right: 0,
+                    child: Transform.translate(
+                      offset: Offset(0, isTop ? -barShift : barShift),
+                      child: barWidget,
+                    ),
+                  ),
+              ],
             ),
           );
         },
@@ -317,6 +426,62 @@ class _SessionsScreenState extends State<SessionsScreen>
       return WithForegroundTask(child: scaffold);
     }
     return scaffold;
+  }
+}
+
+class _TabAction {
+  final String action;
+  final int index;
+  const _TabAction(this.action, this.index);
+}
+
+class _TabOverviewDialog extends StatelessWidget {
+  final List<SshSessionInfo> sessions;
+  final int currentIndex;
+
+  const _TabOverviewDialog({
+    required this.sessions,
+    required this.currentIndex,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Tabs'),
+      contentPadding: const EdgeInsets.only(top: 12),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: sessions.length,
+          itemBuilder: (ctx, i) {
+            final session = sessions[i];
+            final isCurrent = i == currentIndex;
+            return ListTile(
+              selected: isCurrent,
+              leading: Icon(
+                isCurrent ? Icons.terminal : Icons.tab,
+              ),
+              title: Text(session.displayName),
+              subtitle: Text(session.username),
+              trailing: IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () =>
+                    Navigator.pop(ctx, _TabAction('close', i)),
+              ),
+              onTap: () =>
+                  Navigator.pop(ctx, _TabAction('switch', i)),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
   }
 }
 
