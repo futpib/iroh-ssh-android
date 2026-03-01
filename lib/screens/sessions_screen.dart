@@ -364,58 +364,55 @@ class _SessionsScreenState extends State<SessionsScreen>
           final barHeight = keyboardOpen ? 0.0 : _computeBarHeight();
           final clampedOffset = _barHideOffset.clamp(0.0, barHeight);
           final barShift = keyboardOpen ? barHeight : clampedOffset;
-          final terminalShift = isTop
-              ? barHeight - barShift
-              : -(barHeight - barShift);
-
-          final terminalView = TabBarView(
-            controller: _tabController,
-            physics: ScaleAwareScrollPhysics(_scalingNotifier),
-            children: List.generate(_sessions.length, (i) {
-              final session = _sessions[i];
-              return TerminalTab(
-                key: _tabKeys[session.sessionId],
-                session: session,
-                onDisconnected: () => _closeSession(i),
-                connectOnInit: widget.connectOnInit,
-                fontSize: _terminalFontSize,
-                themeName: _terminalTheme,
-                onScalingChanged: (scaling) {
-                  _scalingNotifier.value = scaling;
-                },
-                onVerticalScrollDelta: (delta) {
-                  setState(() {
-                    _barHideOffset = (_barHideOffset - delta).clamp(0.0, barHeight);
-                  });
-                },
-              );
-            }),
-          );
-
-          final barWidget = _buildBar(keyboardOpen);
 
           return Scaffold(
             resizeToAvoidBottomInset: false,
-            body: Stack(
-              children: [
-                Positioned.fill(
-                  child: Transform.translate(
-                    offset: Offset(0, terminalShift),
-                    child: terminalView,
-                  ),
-                ),
-                if (!keyboardOpen)
-                  Positioned(
-                    top: isTop ? 0 : null,
-                    bottom: isTop ? null : 0,
-                    left: 0,
-                    right: 0,
-                    child: Transform.translate(
-                      offset: Offset(0, isTop ? -barShift : barShift),
-                      child: barWidget,
+            body: TabBarView(
+              controller: _tabController,
+              physics: ScaleAwareScrollPhysics(_scalingNotifier),
+              children: List.generate(_sessions.length, (i) {
+                final session = _sessions[i];
+                final terminalTab = TerminalTab(
+                  key: _tabKeys[session.sessionId],
+                  session: session,
+                  onDisconnected: () => _closeSession(i),
+                  connectOnInit: widget.connectOnInit,
+                  fontSize: _terminalFontSize,
+                  themeName: _terminalTheme,
+                  onScalingChanged: (scaling) {
+                    _scalingNotifier.value = scaling;
+                  },
+                  onVerticalScrollDelta: (delta) {
+                    setState(() {
+                      _barHideOffset = (_barHideOffset - delta).clamp(0.0, barHeight);
+                    });
+                  },
+                );
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          top: isTop ? barHeight - barShift : 0,
+                          bottom: !isTop ? barHeight - barShift : 0,
+                        ),
+                        child: terminalTab,
+                      ),
                     ),
-                  ),
-              ],
+                    if (!keyboardOpen)
+                      Positioned(
+                        top: isTop ? 0 : null,
+                        bottom: isTop ? null : 0,
+                        left: 0,
+                        right: 0,
+                        child: Transform.translate(
+                          offset: Offset(0, isTop ? -barShift : barShift),
+                          child: _buildBar(keyboardOpen),
+                        ),
+                      ),
+                  ],
+                );
+              }),
             ),
           );
         },
