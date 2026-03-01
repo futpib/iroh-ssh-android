@@ -439,7 +439,7 @@ packages:
     source: hosted
     version: "9.3.0"
   path:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: path
       sha256: "75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5"
@@ -744,7 +744,7 @@ packages:
     description:
       path: "."
       ref: master
-      resolved-ref: "45c32a3eeb14146d4ea6fe0dd0c57af9e6860f8c"
+      resolved-ref: "6464797fb23347d913ab2b3eb0e1431fb07d78c8"
       url: "https://github.com/futpib/xterm.dart"
     source: git
     version: "4.0.0"

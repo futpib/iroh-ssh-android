@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -171,6 +173,84 @@ void main() {
 
     expect(disconnectedCalled, isTrue,
         reason: 'onDisconnected callback should have been called');
+  });
+
+  testWidgets('ZMODEM file receive via lrzsz-sz', (tester) async {
+    final tabKey = GlobalKey<TerminalTabState>();
+
+    final session = SshSessionInfo(
+      sessionId: 'local_test_zmodem',
+      host: 'localhost',
+      port: 0,
+      username: '',
+      displayName: 'Local',
+      connectionType: ConnectionType.local,
+    );
+
+    SettingsStorage.instance.cache = AppSettings();
+
+    final outputDir = await Directory.systemTemp.createTemp('zmodem_test_');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TerminalTab(
+            key: tabKey,
+            session: session,
+            onDisconnected: () {},
+            connectOnInit: true,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await Future.delayed(const Duration(milliseconds: 500));
+    await tester.pump();
+
+    expect(tabKey.currentState!.connected, isTrue);
+
+    tabKey.currentState!.directoryPickerOverride = () async => outputDir.path;
+
+    final terminal =
+        tester.widget<TerminalView>(find.byType(TerminalView)).terminal;
+
+    // Create a test file and send it with sz
+    final testContent = 'zmodem_test_content_${DateTime.now().millisecondsSinceEpoch}';
+    terminal.textInput('echo "$testContent" > /tmp/zmodem_test_file\r');
+    await Future.delayed(const Duration(milliseconds: 500));
+    await tester.pump();
+
+    // Use lrzsz-sz (Arch) or sz (Ubuntu/Debian) depending on availability
+    final szCommand = File('/usr/bin/lrzsz-sz').existsSync() ? 'lrzsz-sz' : 'sz';
+    terminal.textInput('$szCommand /tmp/zmodem_test_file\r');
+
+    // Poll for the output file to appear
+    final expectedFile = File('${outputDir.path}/zmodem_test_file');
+    var found = false;
+    for (var i = 0; i < 40; i++) {
+      await Future.delayed(const Duration(milliseconds: 250));
+      await tester.pump();
+      if (await expectedFile.exists()) {
+        found = true;
+        break;
+      }
+    }
+
+    expect(found, isTrue, reason: 'Received file should appear in output directory');
+    final receivedContent = await expectedFile.readAsString();
+    expect(receivedContent.trim(), equals(testContent),
+        reason: 'Received file should contain the correct content');
+
+    // Verify the SnackBar was shown
+    expect(find.text('File transfer: zmodem_test_file'), findsOneWidget);
+
+    // Cleanup
+    await outputDir.delete(recursive: true);
+    final tmpFile = File('/tmp/zmodem_test_file');
+    if (await tmpFile.exists()) {
+      await tmpFile.delete();
+    }
   });
 
   testWidgets('local shell in sessions screen shows correct info',

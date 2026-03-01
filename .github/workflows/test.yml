@@ -42,7 +42,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev xvfb
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev xvfb lrzsz
 
       - name: Install dependencies
         run: flutter pub get
@@ -52,3 +52,6 @@ jobs:
 
       - name: Run integration tests (local shell)
         run: xvfb-run flutter test integration_test/local_shell_test.dart -d linux
+
+      - name: Run integration tests (ZMODEM IPC)
+        run: xvfb-run flutter test integration_test/zmodem_ipc_test.dart -d linux

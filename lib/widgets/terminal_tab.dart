@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_pty/flutter_pty.dart';
@@ -13,6 +14,8 @@ import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/widgets/terminal_pane.dart';
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 import 'package:xterm/xterm.dart';
 
 class TerminalTab extends StatefulWidget {
@@ -62,15 +65,22 @@ class TerminalTabState extends State<TerminalTab>
   SSHClient? _client;
   SSHSession? _session;
   Pty? _pty;
-  StreamSubscription? _ptyOutputSubscription;
   Completer<String>? _inputCompleter;
   StringBuffer _inputBuffer = StringBuffer();
   bool _inputEcho = true;
   static const _batchDuration = Duration(milliseconds: 2);
-  final _stdoutBuffer = BytesBuilder(copy: false);
-  Timer? _stdoutFlushTimer;
   final _stderrBuffer = BytesBuilder(copy: false);
   Timer? _stderrFlushTimer;
+
+  // --- ZMODEM ---
+  ZModemMux? _zmodemMux;
+
+  @visibleForTesting
+  Future<String?> Function()? directoryPickerOverride;
+
+  // --- IPC mode ZMODEM adapters ---
+  StreamController<Uint8List>? _ipcStdoutController;
+  StreamController<List<int>>? _ipcStdinController;
 
   bool get connected => _connected;
 
@@ -120,6 +130,23 @@ class TerminalTabState extends State<TerminalTab>
     _serviceDataCallback = _onServiceData;
     FlutterForegroundTask.addTaskDataCallback(_serviceDataCallback!);
 
+    // Set up ZMODEM stream adapters for IPC mode
+    _ipcStdoutController = StreamController<Uint8List>();
+    _ipcStdinController = StreamController<List<int>>();
+    _ipcStdinController!.stream.listen((data) {
+      FlutterForegroundTask.sendDataToTask(InputCommand(
+        sessionId: widget.session.sessionId,
+        dataBase64: base64Encode(data),
+      ).encode());
+    });
+
+    _zmodemMux = ZModemMux(
+      stdin: _ipcStdinController!.sink,
+      stdout: _ipcStdoutController!.stream,
+    );
+    _zmodemMux!.onTerminalInput = _terminal.write;
+    _zmodemMux!.onFileOffer = _handleZModemFileOffer;
+
     _terminal.onOutput = _handleIpcTerminalInput;
     _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
       FlutterForegroundTask.sendDataToTask(ResizeCommand(
@@ -144,7 +171,7 @@ class TerminalTabState extends State<TerminalTab>
       switch (event) {
         case OutputEvent() when event.sessionId == widget.session.sessionId:
           final bytes = base64Decode(event.dataBase64);
-          _terminal.write(utf8.decode(bytes, allowMalformed: true));
+          _ipcStdoutController?.add(Uint8List.fromList(bytes));
         case ReplayEvent() when event.sessionId == widget.session.sessionId:
           if (!_replayReceived) {
             _replayReceived = true;
@@ -210,10 +237,7 @@ class TerminalTabState extends State<TerminalTab>
       paneState.clearModifiers();
     }
 
-    FlutterForegroundTask.sendDataToTask(InputCommand(
-      sessionId: widget.session.sessionId,
-      dataBase64: base64Encode(utf8.encode(toSend)),
-    ).encode());
+    _zmodemMux?.terminalWrite(toSend);
   }
 
   void _handleIpcAuthPrompt(String prompt, bool echo) {
@@ -230,6 +254,11 @@ class TerminalTabState extends State<TerminalTab>
   }
 
   void _detachFromService() {
+    _zmodemMux = null;
+    _ipcStdoutController?.close();
+    _ipcStdoutController = null;
+    _ipcStdinController?.close();
+    _ipcStdinController = null;
     if (_serviceDataCallback != null) {
       FlutterForegroundTask.removeTaskDataCallback(_serviceDataCallback!);
       _serviceDataCallback = null;
@@ -292,11 +321,11 @@ class TerminalTabState extends State<TerminalTab>
             paneState.shiftActive)) {
       final modified = paneState.applyModifiers(data);
       paneState.clearModifiers();
-      _session?.write(utf8.encode(modified));
+      _zmodemMux?.terminalWrite(modified);
       return;
     }
 
-    _session?.write(utf8.encode(data));
+    _zmodemMux?.terminalWrite(data);
   }
 
   void _handleLocalShellTerminalInput(String data) {
@@ -310,19 +339,59 @@ class TerminalTabState extends State<TerminalTab>
       paneState.clearModifiers();
     }
 
-    _pty?.write(utf8.encode(toSend));
-  }
-
-  void _flushStdout() {
-    _stdoutFlushTimer = null;
-    final bytes = _stdoutBuffer.takeBytes();
-    _terminal.write(utf8.decode(bytes, allowMalformed: true));
+    _zmodemMux?.terminalWrite(toSend);
   }
 
   void _flushStderr() {
     _stderrFlushTimer = null;
     final bytes = _stderrBuffer.takeBytes();
     _terminal.write(utf8.decode(bytes, allowMalformed: true));
+  }
+
+  // =========================================================================
+  // ZMODEM file transfer
+  // =========================================================================
+
+  void _handleZModemFileOffer(ZModemOffer offer) async {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('File transfer: ${offer.info.pathname}')),
+      );
+    }
+
+    final outputDir = directoryPickerOverride != null
+        ? await directoryPickerOverride!()
+        : await FilePicker.platform.getDirectoryPath(
+            initialDirectory: (await getDownloadsDirectory())?.path,
+          );
+
+    if (outputDir == null) {
+      offer.skip();
+      return;
+    }
+
+    final file = File(path.join(outputDir, offer.info.pathname));
+
+    void updateProgress(int received) {
+      final length = offer.info.length;
+      if (length != null) {
+        _terminal.write('\r');
+        _terminal.write('\x1b[K');
+        _terminal.write('${offer.info.pathname}: ');
+        _terminal.write((received / length * 100).toStringAsFixed(1));
+        _terminal.write('%');
+      }
+    }
+
+    await offer
+        .accept(0)
+        .cast<List<int>>()
+        .transform(_WithProgress(onProgress: updateProgress))
+        .pipe(file.openWrite());
+
+    _terminal.write('\r\n');
+    _terminal.write('Received ${offer.info.pathname}');
+    _terminal.write('\r\n');
   }
 
   Future<void> _connectSshDirect() async {
@@ -376,10 +445,9 @@ class TerminalTabState extends State<TerminalTab>
       _terminal.buffer.clear();
       _terminal.buffer.setCursor(0, 0);
 
-      _session!.stdout.listen((data) {
-        _stdoutBuffer.add(data);
-        _stdoutFlushTimer ??= Timer(_batchDuration, _flushStdout);
-      });
+      _zmodemMux = ZModemMux(stdin: _session!.stdin, stdout: _session!.stdout);
+      _zmodemMux!.onTerminalInput = _terminal.write;
+      _zmodemMux!.onFileOffer = _handleZModemFileOffer;
 
       _session!.stderr.listen((data) {
         _stderrBuffer.add(data);
@@ -421,10 +489,12 @@ class TerminalTabState extends State<TerminalTab>
       _terminal.buffer.clear();
       _terminal.buffer.setCursor(0, 0);
 
-      _ptyOutputSubscription = _pty!.output.listen((data) {
-        _stdoutBuffer.add(data);
-        _stdoutFlushTimer ??= Timer(_batchDuration, _flushStdout);
-      });
+      _zmodemMux = ZModemMux(
+        stdin: _PtySinkAdapter(_pty!),
+        stdout: _pty!.output,
+      );
+      _zmodemMux!.onTerminalInput = _terminal.write;
+      _zmodemMux!.onFileOffer = _handleZModemFileOffer;
 
       _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
         _pty?.resize(height, width);
@@ -460,8 +530,7 @@ class TerminalTabState extends State<TerminalTab>
   }
 
   void _cleanupDirectConnection() {
-    _ptyOutputSubscription?.cancel();
-    _ptyOutputSubscription = null;
+    _zmodemMux = null;
     _pty?.kill();
     _pty = null;
     _client?.close();
@@ -478,8 +547,6 @@ class TerminalTabState extends State<TerminalTab>
   }
 
   Future<void> _disconnectDirect() async {
-    _ptyOutputSubscription?.cancel();
-    _ptyOutputSubscription = null;
     _pty?.kill();
     _pty = null;
     _session?.close();
@@ -494,7 +561,12 @@ class TerminalTabState extends State<TerminalTab>
 
   @override
   void dispose() {
+    _zmodemMux = null;
     if (_isAndroid) {
+      _ipcStdoutController?.close();
+      _ipcStdoutController = null;
+      _ipcStdinController?.close();
+      _ipcStdinController = null;
       // Detach from service (don't disconnect — session keeps running)
       if (_serviceDataCallback != null) {
         FlutterForegroundTask.removeTaskDataCallback(_serviceDataCallback!);
@@ -505,9 +577,7 @@ class TerminalTabState extends State<TerminalTab>
         DetachCommand(sessionId: widget.session.sessionId).encode(),
       );
     } else {
-      _stdoutFlushTimer?.cancel();
       _stderrFlushTimer?.cancel();
-      _ptyOutputSubscription?.cancel();
       _pty?.kill();
       _session?.close();
       _client?.close();
@@ -554,5 +624,55 @@ class TerminalTabState extends State<TerminalTab>
           ),
       ],
     );
+  }
+}
+
+class _PtySinkAdapter implements StreamSink<List<int>> {
+  final Pty _pty;
+
+  _PtySinkAdapter(this._pty);
+
+  @override
+  void add(List<int> data) {
+    _pty.write(Uint8List.fromList(data));
+  }
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) {}
+
+  @override
+  Future addStream(Stream<List<int>> stream) {
+    final completer = Completer<void>();
+    stream.listen(
+      add,
+      onError: addError,
+      onDone: completer.complete,
+    );
+    return completer.future;
+  }
+
+  @override
+  Future close() async {}
+
+  @override
+  Future get done => Future.value();
+}
+
+class _WithProgress<T> extends StreamTransformerBase<List<T>, List<T>> {
+  _WithProgress({this.onProgress});
+
+  void Function(int progress)? onProgress;
+
+  var _progress = 0;
+
+  @override
+  Stream<List<T>> bind(Stream<List<T>> stream) {
+    return stream.transform(StreamTransformer<List<T>, List<T>>.fromHandlers(
+      handleData: (List<T> data, EventSink<List<T>> sink) {
+        _progress += data.length;
+        onProgress?.call(_progress);
+        sink.add(data);
+      },
+    ));
   }
 }
