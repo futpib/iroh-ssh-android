@@ -6,9 +6,11 @@ An Android SSH client powered by [iroh](https://iroh.computer/) for peer-to-peer
 
 ## Screenshots
 
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="200" alt="Connect screen showing Iroh, SSH and Local tabs with saved connections">
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" width="200" alt="Active terminal session with on-screen keyboard">
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" width="200" alt="SSH session open in the terminal emulator">
+<table><tr>
+<td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="200" alt="Connect screen showing Iroh, SSH and Local tabs with saved connections"></td>
+<td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" width="200" alt="Active terminal session with on-screen keyboard"></td>
+<td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" width="200" alt="SSH session open in the terminal emulator"></td>
+</tr></table>
 
 ## Overview
 
