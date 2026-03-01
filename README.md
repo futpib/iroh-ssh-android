@@ -4,6 +4,12 @@ An Android SSH client powered by [iroh](https://iroh.computer/) for peer-to-peer
 
 [<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" height="80" alt="Get it on Obtainium">](https://apps.obtainium.imranr.dev/redirect.html?r=obtainium://add/https://github.com/futpib/iroh-ssh-android)
 
+## Screenshots
+
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="200" alt="Connect screen showing Iroh, SSH and Local tabs with saved connections">
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" width="200" alt="Active terminal session with on-screen keyboard">
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" width="200" alt="SSH session open in the terminal emulator">
+
 ## Overview
 
 iroh-ssh lets you open SSH sessions to remote hosts over the iroh peer-to-peer network.
