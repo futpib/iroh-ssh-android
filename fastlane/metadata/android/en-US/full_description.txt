@@ -1,0 +1,14 @@
+Iroh SSH lets you open SSH sessions to remote hosts over the iroh peer-to-peer network. Instead of requiring a routable IP address or VPN, it uses iroh's relay-assisted NAT traversal so you can reach machines behind firewalls or dynamic IPs — as long as both sides run an iroh-ssh endpoint.
+
+Features:
+
+* P2P SSH connections — connect using iroh endpoint IDs without a public IP
+* Direct SSH connections — connect to any host via user@host or user@host:port
+* Local shell — open a local terminal session on the device
+* Multiple sessions — manage several concurrent sessions in tabs
+* Full xterm-compatible terminal with configurable font size and colour theme
+* SSH key management — generate Ed25519 keys, import existing keys, copy/export public keys
+* QR code scanning — scan connection targets or import private keys from QR codes
+* Saved connections — quickly reconnect to previously used hosts
+* Background sessions — sessions run in a foreground service so they survive app backgrounding
+* Configurable relay servers — use iroh's default relays, add custom relay URLs, or disable relays entirely
