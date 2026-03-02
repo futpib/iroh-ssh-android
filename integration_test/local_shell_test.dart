@@ -242,9 +242,6 @@ void main() {
     expect(receivedContent.trim(), equals(testContent),
         reason: 'Received file should contain the correct content');
 
-    // Verify the SnackBar was shown
-    expect(find.text('File transfer: zmodem_test_file'), findsOneWidget);
-
     // Cleanup
     await outputDir.delete(recursive: true);
     final tmpFile = File('/tmp/zmodem_test_file');

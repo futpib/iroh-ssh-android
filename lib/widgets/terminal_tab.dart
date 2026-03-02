@@ -7,6 +7,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
@@ -47,6 +48,11 @@ class TerminalTab extends StatefulWidget {
 class TerminalTabState extends State<TerminalTab>
     with AutomaticKeepAliveClientMixin {
   static final bool _isAndroid = Platform.isAndroid;
+
+  static Future<void> _showToast(String message) async {
+    if (!_isAndroid) return;
+    await Fluttertoast.showToast(msg: message);
+  }
 
   final _terminal = Terminal(maxLines: 10000);
   final _paneKey = GlobalKey<TerminalPaneState>();
@@ -353,11 +359,7 @@ class TerminalTabState extends State<TerminalTab>
   // =========================================================================
 
   void _handleZModemFileOffer(ZModemOffer offer) async {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('File transfer: ${offer.info.pathname}')),
-      );
-    }
+    _showToast('File offered: ${offer.info.pathname}');
 
     final outputDir = directoryPickerOverride != null
         ? await directoryPickerOverride!()
@@ -371,6 +373,8 @@ class TerminalTabState extends State<TerminalTab>
     }
 
     final file = File(path.join(outputDir, offer.info.pathname));
+
+    _showToast('Downloading: ${offer.info.pathname}');
 
     void updateProgress(int received) {
       final length = offer.info.length;
@@ -392,6 +396,8 @@ class TerminalTabState extends State<TerminalTab>
     _terminal.write('\r\n');
     _terminal.write('Received ${offer.info.pathname}');
     _terminal.write('\r\n');
+
+    _showToast('Received: ${offer.info.pathname}');
   }
 
   Future<void> _connectSshDirect() async {

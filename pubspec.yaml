@@ -51,6 +51,7 @@ dependencies:
   file_picker: ^10.3.10
   flutter_pty: ^0.4.2
   path: ^1.9.1
+  fluttertoast: ^9.0.0
 
 dev_dependencies:
   flutter_test:
