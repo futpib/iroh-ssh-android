@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_zxing/flutter_zxing.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key});
@@ -11,18 +11,19 @@ class QrScannerScreen extends StatefulWidget {
 class _QrScannerScreenState extends State<QrScannerScreen> {
   bool _scanned = false;
 
+  void _onDetect(BarcodeCapture capture) {
+    if (_scanned) return;
+    final barcode = capture.barcodes.firstOrNull;
+    if (barcode == null || barcode.rawValue == null) return;
+    _scanned = true;
+    Navigator.of(context).pop(barcode.rawValue);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Scan QR Code')),
-      body: ReaderWidget(
-        onScan: (result) async {
-          if (_scanned) return;
-          if (!result.isValid || result.text == null) return;
-          _scanned = true;
-          Navigator.of(context).pop(result.text);
-        },
-      ),
+      body: MobileScanner(onDetect: _onDetect),
     );
   }
 }

@@ -48,6 +48,9 @@ jobs:
           echo "name=$(date -u +'%y.%m.%d.%H.%M')" >> "$GITHUB_OUTPUT"
           echo "code=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
+      - name: Use ML Kit scanner
+        run: cp lib/screens/qr_scanner_screen_mlkit.dart lib/screens/qr_scanner_screen.dart
+
       - name: Build APK
         env:
           KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/keystore.jks', runner.temp) || '' }}
