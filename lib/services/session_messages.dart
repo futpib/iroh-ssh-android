@@ -242,6 +242,7 @@ sealed class ServiceEvent {
       'auth_prompt' => AuthPromptEvent.fromJson(json),
       'error' => ErrorEvent.fromJson(json),
       'status' => StatusEvent.fromJson(json),
+      'shell_ready' => ShellReadyEvent.fromJson(json),
       _ => throw ArgumentError('Unknown event type: ${json['type']}'),
     };
   }
@@ -463,4 +464,19 @@ class StatusEvent extends ServiceEvent {
         sessionId: json['sessionId'] as String,
         message: json['message'] as String,
       );
+}
+
+class ShellReadyEvent extends ServiceEvent {
+  final String sessionId;
+
+  ShellReadyEvent({required this.sessionId});
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'shell_ready',
+        'sessionId': sessionId,
+      };
+
+  factory ShellReadyEvent.fromJson(Map<String, dynamic> json) =>
+      ShellReadyEvent(sessionId: json['sessionId'] as String);
 }

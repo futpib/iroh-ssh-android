@@ -125,6 +125,7 @@ class BackgroundSession {
       );
 
       state = SessionState.connected;
+      _sendShellReady();
 
       _session!.stdout.listen((data) {
         _stdoutBuffer.add(data);
@@ -158,6 +159,7 @@ class BackgroundSession {
       _pty = Pty.start(shell, columns: 80, rows: 24);
 
       state = SessionState.connected;
+      _sendShellReady();
 
       _ptyOutputSubscription = _pty!.output.listen((data) {
         _stdoutBuffer.add(data);
@@ -213,6 +215,12 @@ class BackgroundSession {
     }
   }
 
+  void _sendShellReady() {
+    if (onSendToUi != null) {
+      onSendToUi!(ShellReadyEvent(sessionId: sessionId).encode());
+    }
+  }
+
   Future<String> _requestAuth(String prompt, {required bool echo}) async {
     if (uiAttached && onSendToUi != null) {
       _authCompleter = Completer<String>();
@@ -258,6 +266,10 @@ class BackgroundSession {
 
   void onAttach() {
     uiAttached = true;
+
+    if (state == SessionState.connected) {
+      _sendShellReady();
+    }
 
     // Send any pending auth prompts
     if (_pendingAuthPrompts.isNotEmpty && onSendToUi != null) {

@@ -190,7 +190,7 @@ void main() {
     // moving the cursor.
     final cursorRow = terminal.buffer.cursorY + 1; // 1-based for CSI
     final cursorCol = terminal.buffer.cursorX + 1;
-    terminal.write('\x1B[${cursorRow};${cursorCol}H');
+    terminal.write('\x1B[$cursorRow;${cursorCol}H');
     await tester.pumpAndSettle();
 
     // Scroll should stay where the user left it.

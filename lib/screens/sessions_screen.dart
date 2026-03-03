@@ -196,10 +196,37 @@ class _SessionsScreenState extends State<SessionsScreen>
     if (_sessions.isEmpty) return true;
 
     if (_isAndroid) {
-      // Detach all sessions and go back — sessions keep running in background
+      final hasReadySessions = _sessions.any((session) {
+        final tabState = _tabKeys[session.sessionId]?.currentState;
+        return tabState != null && tabState.shellReady;
+      });
+
+      if (hasReadySessions) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Disconnect all?'),
+            content: Text(
+              'This will close ${_sessions.length} active session${_sessions.length > 1 ? 's' : ''}.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Disconnect'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return false;
+      }
+
       for (final session in _sessions) {
         FlutterForegroundTask.sendDataToTask(
-          DetachCommand(sessionId: session.sessionId).encode(),
+          DisconnectCommand(sessionId: session.sessionId).encode(),
         );
       }
       return true;

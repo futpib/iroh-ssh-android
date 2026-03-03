@@ -58,6 +58,7 @@ class TerminalTabState extends State<TerminalTab>
   final _paneKey = GlobalKey<TerminalPaneState>();
   bool _connected = false;
   bool _authFailed = false;
+  bool _shellReady = false;
   late double _fontSize;
 
   // --- IPC mode (Android) ---
@@ -89,6 +90,7 @@ class TerminalTabState extends State<TerminalTab>
   StreamController<List<int>>? _ipcStdinController;
 
   bool get connected => _connected;
+  bool get shellReady => _shellReady;
 
   void requestFocus() {
     _paneKey.currentState?.requestFocus();
@@ -200,6 +202,9 @@ class TerminalTabState extends State<TerminalTab>
           if (mounted) {
             setState(() => _authFailed = true);
           }
+        case ShellReadyEvent()
+            when event.sessionId == widget.session.sessionId:
+          _shellReady = true;
         default:
           break;
       }
@@ -470,7 +475,10 @@ class TerminalTabState extends State<TerminalTab>
         }
       });
 
-      setState(() => _connected = true);
+      setState(() {
+        _connected = true;
+        _shellReady = true;
+      });
     } catch (e) {
       _terminal.write('\r\nError: $e\r\n');
       if (mounted) {
@@ -512,7 +520,10 @@ class TerminalTabState extends State<TerminalTab>
         }
       });
 
-      setState(() => _connected = true);
+      setState(() {
+        _connected = true;
+        _shellReady = true;
+      });
     } catch (e) {
       _terminal.write('\r\nError: $e\r\n');
       if (mounted) {
