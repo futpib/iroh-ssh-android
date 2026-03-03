@@ -93,4 +93,109 @@ void main() {
         reason:
             'Cursor row should be within the visible viewport (cursor scrolled off bottom)');
   });
+
+  testWidgets('scroll correction is suppressed while user finger is down',
+      (tester) async {
+    final terminal = Terminal(maxLines: 100);
+
+    await tester.pumpWidget(_buildApp(
+      terminal: terminal,
+      keyboardHeight: 0,
+    ));
+    await tester.pumpAndSettle();
+
+    // Fill enough lines so there is scrollback when keyboard opens.
+    final fullViewHeight = terminal.viewHeight;
+    for (var i = 0; i < fullViewHeight + 10; i++) {
+      terminal.write('line $i\r\n');
+    }
+    await tester.pumpAndSettle();
+
+    // Open keyboard.
+    await tester.pumpWidget(_buildApp(
+      terminal: terminal,
+      keyboardHeight: 300,
+    ));
+    await tester.pumpAndSettle();
+
+    // Record where the scroll settled after keyboard opened.
+    final offsetAfterKeyboard = _scrollOffset(tester);
+
+    // User manually scrolls up by dragging.
+    final terminalCenter = tester.getCenter(find.byType(TerminalView));
+    final gesture = await tester.startGesture(terminalCenter);
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, 100));
+    await tester.pump();
+
+    final offsetAfterDrag = _scrollOffset(tester);
+    expect(offsetAfterDrag, isNot(equals(offsetAfterKeyboard)),
+        reason: 'User drag should have moved scroll position');
+
+    // While finger is still down, terminal output arrives that moves cursor.
+    terminal.write('new output\r\n');
+    await tester.pumpAndSettle();
+
+    // Scroll should NOT have jumped back — user is still touching.
+    expect(_scrollOffset(tester), equals(offsetAfterDrag),
+        reason:
+            'Scroll correction must not fire while user finger is on screen');
+
+    // Lift finger.
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('same-position cursor move does not trigger scroll correction',
+      (tester) async {
+    final terminal = Terminal(maxLines: 100);
+
+    await tester.pumpWidget(_buildApp(
+      terminal: terminal,
+      keyboardHeight: 0,
+    ));
+    await tester.pumpAndSettle();
+
+    // Fill lines so there is scrollback.
+    final fullViewHeight = terminal.viewHeight;
+    for (var i = 0; i < fullViewHeight + 10; i++) {
+      terminal.write('line $i\r\n');
+    }
+    await tester.pumpAndSettle();
+
+    // Open keyboard and let initial correction settle.
+    await tester.pumpWidget(_buildApp(
+      terminal: terminal,
+      keyboardHeight: 300,
+    ));
+    await tester.pumpAndSettle();
+
+    final offsetAfterKeyboard = _scrollOffset(tester);
+
+    // User scrolls up manually.
+    final terminalCenter = tester.getCenter(find.byType(TerminalView));
+    final gesture = await tester.startGesture(terminalCenter);
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, 80));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    final offsetAfterScroll = _scrollOffset(tester);
+    expect(offsetAfterScroll, isNot(equals(offsetAfterKeyboard)),
+        reason: 'User should have scrolled to a different position');
+
+    // Move cursor to same absolute position it's already at (CUP to current
+    // row). This triggers a terminal change notification without actually
+    // moving the cursor.
+    final cursorRow = terminal.buffer.cursorY + 1; // 1-based for CSI
+    final cursorCol = terminal.buffer.cursorX + 1;
+    terminal.write('\x1B[${cursorRow};${cursorCol}H');
+    await tester.pumpAndSettle();
+
+    // Scroll should stay where the user left it.
+    expect(_scrollOffset(tester), equals(offsetAfterScroll),
+        reason:
+            'Same-position cursor move should not trigger scroll correction');
+  });
 }

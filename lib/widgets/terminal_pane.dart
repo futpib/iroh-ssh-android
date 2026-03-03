@@ -69,6 +69,9 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   bool _keyboardOpen = false;
   int _fnPage = 0;
   Timer? _repeatTimer;
+  bool _userTouching = false;
+  Timer? _scrollCorrectionDebounce;
+  int _lastCursorAbsY = -1;
 
   void requestFocus() {
     _focusNode.requestFocus();
@@ -121,13 +124,36 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   void _onTerminalChange() {
     if (!_keyboardOpen) return;
     if (_terminalHeight == null) return;
-    _scheduleScrollCorrection();
+    if (_userTouching) return;
+
+    final viewHeight = widget.terminal.viewHeight;
+    if (viewHeight <= 0) return;
+    final scrollBack = widget.terminal.buffer.lines.length - viewHeight;
+    final cursorAbsY =
+        widget.terminal.buffer.cursorY + (scrollBack > 0 ? scrollBack : 0);
+    if (cursorAbsY == _lastCursorAbsY) return;
+
+    _debouncedScrollCorrection();
   }
 
-  void _scheduleScrollCorrection() {
+  static const _scrollCorrectionDelay = Duration(milliseconds: 16);
+
+  void _debouncedScrollCorrection() {
+    if (_scrollCorrectionDebounce == null) {
+      _applyScrollCorrection();
+    }
+    _scrollCorrectionDebounce?.cancel();
+    _scrollCorrectionDebounce = Timer(_scrollCorrectionDelay, () {
+      _scrollCorrectionDebounce = null;
+      _applyScrollCorrection();
+    });
+  }
+
+  void _applyScrollCorrection() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!_keyboardOpen) return;
+      if (_userTouching) return;
       if (!_scrollController.hasClients) return;
       final viewHeight = widget.terminal.viewHeight;
       if (viewHeight <= 0) return;
@@ -136,6 +162,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
           widget.terminal.buffer.lines.length - viewHeight;
       final cursorAbsY =
           widget.terminal.buffer.cursorY + (scrollBack > 0 ? scrollBack : 0);
+      _lastCursorAbsY = cursorAbsY;
       final viewportHeight = _scrollController.position.viewportDimension;
       final cursorBottom = (cursorAbsY + 1) * cellHeight;
       final target = (cursorBottom - viewportHeight).clamp(
@@ -146,6 +173,10 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
         _scrollController.jumpTo(target);
       }
     });
+  }
+
+  void _scheduleScrollCorrection() {
+    _debouncedScrollCorrection();
   }
 
   @override
@@ -169,6 +200,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   @override
   void dispose() {
     _repeatTimer?.cancel();
+    _scrollCorrectionDebounce?.cancel();
     _flingController?.dispose();
     widget.terminal.removeListener(_onTerminalChange);
     scalingNotifier.dispose();
@@ -480,6 +512,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                   },
                   onPointerDown: (event) {
                     _pointerPositions[event.pointer] = event.position;
+                    _userTouching = true;
                     _flingController?.stop();
                     if (_pointerPositions.length == 1) {
                       _scrollPointerId = event.pointer;
@@ -541,6 +574,9 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                   },
                   onPointerUp: (event) {
                     _pointerPositions.remove(event.pointer);
+                    if (_pointerPositions.isEmpty) {
+                      _userTouching = false;
+                    }
                     if (event.pointer == _scrollPointerId) {
                       _startFling();
                       _scrollPointerId = null;
@@ -559,6 +595,9 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                   },
                   onPointerCancel: (event) {
                     _pointerPositions.remove(event.pointer);
+                    if (_pointerPositions.isEmpty) {
+                      _userTouching = false;
+                    }
                     if (event.pointer == _scrollPointerId) {
                       _scrollPointerId = null;
                     }
