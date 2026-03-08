@@ -2,9 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:iroh_ssh_app/input_processor.dart';
 import 'package:xterm/xterm.dart';
-
-enum ModifierState { off, transient, locked }
 
 class ScaleAwareScrollPhysics extends ScrollPhysics {
   final ValueNotifier<bool> scaling;
@@ -48,9 +47,7 @@ class TerminalPane extends StatefulWidget {
 
 class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderStateMixin {
   late FocusNode _focusNode;
-  ModifierState _ctrlState = ModifierState.off;
-  ModifierState _altState = ModifierState.off;
-  ModifierState _shiftState = ModifierState.off;
+  final _input = InputProcessor();
   double? _terminalHeight;
   late double _currentFontSize;
   double _baseScaleFontSize = 0;
@@ -72,6 +69,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   bool _userTouching = false;
   Timer? _scrollCorrectionDebounce;
   int _lastCursorAbsY = -1;
+  bool _glideTyping = false;
 
   void requestFocus() {
     _focusNode.requestFocus();
@@ -211,58 +209,21 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
     super.dispose();
   }
 
-  String applyModifiers(String data) {
-    final buf = StringBuffer();
-    for (final char in data.codeUnits) {
-      if (ctrlActive && char >= 0x61 && char <= 0x7a) {
-        buf.writeCharCode(char - 0x60);
-      } else if (ctrlActive && char >= 0x41 && char <= 0x5a) {
-        buf.writeCharCode(char - 0x40);
-      } else if (altActive) {
-        buf.writeCharCode(0x1b);
-        if (shiftActive) {
-          buf.writeCharCode(
-            (char >= 0x61 && char <= 0x7a) ? char - 0x20 : char,
-          );
-        } else {
-          buf.writeCharCode(char);
-        }
-      } else if (shiftActive) {
-        buf.writeCharCode(
-          (char >= 0x61 && char <= 0x7a) ? char - 0x20 : char,
-        );
-      } else {
-        buf.writeCharCode(char);
-      }
-    }
-    return buf.toString();
-  }
+  String applyModifiers(String data) => _input.applyModifiers(data);
 
-  bool get ctrlActive =>
-      _ctrlState == ModifierState.transient ||
-      _ctrlState == ModifierState.locked;
+  bool get ctrlActive => _input.ctrlActive;
 
-  bool get altActive =>
-      _altState == ModifierState.transient ||
-      _altState == ModifierState.locked;
+  bool get altActive => _input.altActive;
 
-  bool get shiftActive =>
-      _shiftState == ModifierState.transient ||
-      _shiftState == ModifierState.locked;
+  bool get shiftActive => _input.shiftActive;
 
   void clearModifiers() {
-    if (_ctrlState == ModifierState.transient) {
-      setState(() => _ctrlState = ModifierState.off);
-    }
-    if (_altState == ModifierState.transient) {
-      setState(() => _altState = ModifierState.off);
-    }
-    if (_shiftState == ModifierState.transient) {
-      setState(() => _shiftState = ModifierState.off);
-    }
+    _input.clearModifiers();
+    setState(() {});
   }
 
   void _sendKey(TerminalKey key) {
+    debugPrint('[TerminalPane._sendKey] -> terminal.keyInput($key, ctrl=$ctrlActive, alt=$altActive, shift=$shiftActive)');
     widget.terminal.keyInput(
       key,
       ctrl: ctrlActive,
@@ -272,25 +233,38 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
     clearModifiers();
   }
 
+  void _onInput(TextEditingValue baseState, TextEditingValue currentState) {
+    debugPrint('[TerminalPane._onInput] base="${baseState.text}" current="${currentState.text}" mode=${_glideTyping ? "GLIDE" : "PWD"} ctrl=${_input.ctrlState} alt=${_input.altState} shift=${_input.shiftState} modifiedInput=${_input.modifiedInput}');
+    final result = _input.processInput(baseState.text, currentState.text);
+    debugPrint('[TerminalPane._onInput] deleted=${result.deletions} inserted="${result.inserted}" modified="${result.modified}"');
+    if (result.deletions > 0) {
+      debugPrint('[TerminalPane._onInput] -> terminal.keyInput(backspace) x${result.deletions}');
+      for (int i = 0; i < result.deletions; i++) {
+        widget.terminal.keyInput(TerminalKey.backspace);
+      }
+    }
+    if (result.modified.isNotEmpty) {
+      debugPrint('[TerminalPane._onInput] -> terminal.textInput(${result.modified.codeUnits.map((c) => '0x${c.toRadixString(16)}').join(' ')})');
+      widget.terminal.textInput(result.modified);
+      setState(() {});
+    }
+  }
+
+  TextEditingValue? _onCommitEditingState(TextEditingValue committed) {
+    debugPrint('[TerminalPane._onCommitEditingState] committed="${committed.text}" mode=${_glideTyping ? "GLIDE" : "PWD"} ctrl=${_input.ctrlState} alt=${_input.altState} shift=${_input.shiftState} modifiedInput=${_input.modifiedInput}');
+    final result = _input.commitEditingState(committed);
+    debugPrint('[TerminalPane._onCommitEditingState] -> ${result != null ? 'retained="${result.text}"' : 'null (reset)'}');
+    return result;
+  }
+
   static const double _toolbarHeight = 64;
   static const int _fnPageCount = 2;
-
-  void _sendChar(String char) {
-    widget.terminal.textInput(char);
-  }
 
   void _cycleModifier(
     ModifierState current,
     void Function(ModifierState) setter,
   ) {
-    switch (current) {
-      case ModifierState.off:
-        setter(ModifierState.transient);
-      case ModifierState.transient:
-        setter(ModifierState.locked);
-      case ModifierState.locked:
-        setter(ModifierState.off);
-    }
+    _input.cycleModifier(current, setter);
   }
 
   Widget _buildToolbar() {
@@ -332,10 +306,12 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
     }
     return [
       _toolbarButton('ESC', () => _sendKey(TerminalKey.escape)),
-      _modifierButton('SHIFT', _shiftState, () {
-        setState(() => _cycleModifier(_shiftState, (s) => _shiftState = s));
+      _modifierButton('SHIFT', _input.shiftState, () {
+        setState(() => _cycleModifier(_input.shiftState, (s) => _input.shiftState = s));
       }),
-      _toolbarButton('/', () => _sendChar('/')),
+      _modifierButton('PWD', _glideTyping ? ModifierState.off : ModifierState.locked, () {
+        setState(() => _glideTyping = !_glideTyping);
+      }),
       _repeatableToolbarButton('HOME', () => _sendKey(TerminalKey.home)),
       _repeatableToolbarButton('↑', () => _sendKey(TerminalKey.arrowUp)),
       _repeatableToolbarButton('END', () => _sendKey(TerminalKey.end)),
@@ -357,11 +333,11 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
     }
     return [
       _toolbarButton('TAB', () => _sendKey(TerminalKey.tab)),
-      _modifierButton('CTRL', _ctrlState, () {
-        setState(() => _cycleModifier(_ctrlState, (s) => _ctrlState = s));
+      _modifierButton('CTRL', _input.ctrlState, () {
+        setState(() => _cycleModifier(_input.ctrlState, (s) => _input.ctrlState = s));
       }),
-      _modifierButton('ALT', _altState, () {
-        setState(() => _cycleModifier(_altState, (s) => _altState = s));
+      _modifierButton('ALT', _input.altState, () {
+        setState(() => _cycleModifier(_input.altState, (s) => _input.altState = s));
       }),
       _repeatableToolbarButton('←', () => _sendKey(TerminalKey.arrowLeft)),
       _repeatableToolbarButton('↓', () => _sendKey(TerminalKey.arrowDown)),
@@ -620,6 +596,9 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                     scrollOnInput: !keyboardOpen,
                     scrollController: _scrollController,
                     scrollPhysics: const NeverScrollableScrollPhysics(),
+                    onCommitEditingState: _glideTyping ? _onCommitEditingState : null,
+                    onInput: _onInput,
+                    keyboardType: _glideTyping ? TextInputType.emailAddress : TextInputType.visiblePassword,
                     theme: widget.theme,
                     textStyle: TerminalStyle(
                       fontSize: _currentFontSize,
