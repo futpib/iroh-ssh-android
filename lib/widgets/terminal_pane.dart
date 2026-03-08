@@ -223,7 +223,6 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   }
 
   void _sendKey(TerminalKey key) {
-    debugPrint('[TerminalPane._sendKey] -> terminal.keyInput($key, ctrl=$ctrlActive, alt=$altActive, shift=$shiftActive)');
     widget.terminal.keyInput(
       key,
       ctrl: ctrlActive,
@@ -234,27 +233,18 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   }
 
   void _onInput(TextEditingValue baseState, TextEditingValue currentState) {
-    debugPrint('[TerminalPane._onInput] base="${baseState.text}" current="${currentState.text}" mode=${_glideTyping ? "GLIDE" : "PWD"} ctrl=${_input.ctrlState} alt=${_input.altState} shift=${_input.shiftState} modifiedInput=${_input.modifiedInput}');
     final result = _input.processInput(baseState.text, currentState.text);
-    debugPrint('[TerminalPane._onInput] deleted=${result.deletions} inserted="${result.inserted}" modified="${result.modified}"');
-    if (result.deletions > 0) {
-      debugPrint('[TerminalPane._onInput] -> terminal.keyInput(backspace) x${result.deletions}');
-      for (int i = 0; i < result.deletions; i++) {
-        widget.terminal.keyInput(TerminalKey.backspace);
-      }
+    for (int i = 0; i < result.deletions; i++) {
+      widget.terminal.keyInput(TerminalKey.backspace);
     }
     if (result.modified.isNotEmpty) {
-      debugPrint('[TerminalPane._onInput] -> terminal.textInput(${result.modified.codeUnits.map((c) => '0x${c.toRadixString(16)}').join(' ')})');
       widget.terminal.textInput(result.modified);
       setState(() {});
     }
   }
 
   TextEditingValue? _onCommitEditingState(TextEditingValue committed) {
-    debugPrint('[TerminalPane._onCommitEditingState] committed="${committed.text}" mode=${_glideTyping ? "GLIDE" : "PWD"} ctrl=${_input.ctrlState} alt=${_input.altState} shift=${_input.shiftState} modifiedInput=${_input.modifiedInput}');
-    final result = _input.commitEditingState(committed);
-    debugPrint('[TerminalPane._onCommitEditingState] -> ${result != null ? 'retained="${result.text}"' : 'null (reset)'}');
-    return result;
+    return _input.commitEditingState(committed);
   }
 
   static const double _toolbarHeight = 64;
