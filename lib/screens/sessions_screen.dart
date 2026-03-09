@@ -256,9 +256,9 @@ class _SessionsScreenState extends State<SessionsScreen>
     return confirmed ?? false;
   }
 
-  Widget _buildBar(bool keyboardOpen) {
+  Widget _buildBar(bool keyboardOpen, {SshSessionInfo? session}) {
     if (_sessions.isEmpty) return const SizedBox.shrink();
-    final currentSession = _sessions[_tabController.index];
+    final currentSession = session ?? _sessions[_tabController.index];
     final theme = Theme.of(context);
     final appBarTheme = AppBarTheme.of(context);
     final backgroundColor =
@@ -434,7 +434,7 @@ class _SessionsScreenState extends State<SessionsScreen>
                         right: 0,
                         child: Transform.translate(
                           offset: Offset(0, isTop ? -barShift : barShift),
-                          child: _buildBar(keyboardOpen),
+                          child: _buildBar(keyboardOpen, session: session),
                         ),
                       ),
                   ],
