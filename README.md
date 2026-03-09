@@ -1,4 +1,4 @@
-# iroh-ssh
+# Iroh SSH (Android)
 
 An Android SSH client powered by [iroh](https://iroh.computer/) for peer-to-peer connections.
 
