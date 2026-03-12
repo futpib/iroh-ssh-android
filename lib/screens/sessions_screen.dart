@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -43,6 +44,11 @@ class _SessionsScreenState extends State<SessionsScreen>
   double _barHideOffset = 0.0;
   final ValueNotifier<bool> _scalingNotifier = ValueNotifier(false);
   void Function(Object)? _serviceDataCallback;
+  final Map<String, ui.Image> _thumbnailCache = {};
+  final Map<String, double> _cursorYCache = {};
+  final Map<String, double> _cursorXCache = {};
+  final Map<String, int> _viewHeightCache = {};
+  int _previousTabIndex = 0;
 
   @override
   void initState() {
@@ -109,7 +115,10 @@ class _SessionsScreenState extends State<SessionsScreen>
   }
 
   void _onTabChanged() {
-    if (!_tabController.indexIsChanging) {
+    if (_tabController.indexIsChanging) {
+      _captureTab(_previousTabIndex);
+    } else {
+      _previousTabIndex = _tabController.index;
       final session = _sessions[_tabController.index];
       final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
       if (keyboardOpen || !_isAndroid) {
@@ -117,6 +126,23 @@ class _SessionsScreenState extends State<SessionsScreen>
       }
       setState(() {});
     }
+  }
+
+  void _captureTab(int index) {
+    if (index < 0 || index >= _sessions.length) return;
+    final session = _sessions[index];
+    final state = _tabKeys[session.sessionId]?.currentState;
+    if (state == null) return;
+    _cursorYCache[session.sessionId] = state.cursorVerticalFraction;
+    _cursorXCache[session.sessionId] = state.cursorHorizontalFraction;
+    _viewHeightCache[session.sessionId] = state.terminalViewHeight;
+    final pixelRatio = MediaQuery.of(context).devicePixelRatio;
+    final captureRatio = (pixelRatio * 0.5).clamp(0.5, 1.5);
+    state.captureImage(pixelRatio: captureRatio).then((image) {
+      if (image != null) {
+        _thumbnailCache[session.sessionId] = image;
+      }
+    });
   }
 
   @override
@@ -175,6 +201,10 @@ class _SessionsScreenState extends State<SessionsScreen>
     if (index >= _sessions.length) return;
     final session = _sessions[index];
     _tabKeys.remove(session.sessionId);
+    _thumbnailCache.remove(session.sessionId);
+    _cursorYCache.remove(session.sessionId);
+    _cursorXCache.remove(session.sessionId);
+    _viewHeightCache.remove(session.sessionId);
 
     setState(() {
       _sessions.removeAt(index);
@@ -345,14 +375,42 @@ class _SessionsScreenState extends State<SessionsScreen>
   }
 
   void _showTabOverview() async {
+    // Capture the current (visible) tab before dismissing keyboard
+    _captureTab(_tabController.index);
+
     final tabState = _tabKeys[_sessions[_tabController.index].sessionId]?.currentState;
     tabState?.disableFocus();
+
+    // Wait for the paint pass after keyboard dismissal / layout change
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+
+    // Try to capture current tab again after layout settles (without keyboard)
+    final currentSession = _sessions[_tabController.index];
+    final currentState = _tabKeys[currentSession.sessionId]?.currentState;
+    if (currentState != null) {
+      final pixelRatio = MediaQuery.of(context).devicePixelRatio;
+      final captureRatio = (pixelRatio * 0.5).clamp(0.5, 1.5);
+      final image = await currentState.captureImage(pixelRatio: captureRatio);
+      if (image != null) {
+        _thumbnailCache[currentSession.sessionId] = image;
+      }
+      _cursorYCache[currentSession.sessionId] = currentState.cursorVerticalFraction;
+      _cursorXCache[currentSession.sessionId] = currentState.cursorHorizontalFraction;
+      _viewHeightCache[currentSession.sessionId] = currentState.terminalViewHeight;
+    }
+
+    if (!mounted) return;
     final result = await Navigator.of(context).push<TabSwitcherResult>(
       MaterialPageRoute(
         builder: (_) => TabSwitcherScreen(
           sessions: _sessions,
           currentIndex: _tabController.index,
           viewStyle: _tabViewStyle,
+          thumbnails: _thumbnailCache,
+          cursorYPositions: _cursorYCache,
+          cursorXPositions: _cursorXCache,
+          viewHeights: _viewHeightCache,
         ),
       ),
     );

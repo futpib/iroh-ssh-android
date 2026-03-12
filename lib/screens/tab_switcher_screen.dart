@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 
@@ -15,12 +17,20 @@ class TabSwitcherScreen extends StatefulWidget {
   final List<SshSessionInfo> sessions;
   final int currentIndex;
   final String viewStyle;
+  final Map<String, ui.Image> thumbnails;
+  final Map<String, double> cursorYPositions;
+  final Map<String, double> cursorXPositions;
+  final Map<String, int> viewHeights;
 
   const TabSwitcherScreen({
     super.key,
     required this.sessions,
     required this.currentIndex,
     required this.viewStyle,
+    this.thumbnails = const {},
+    this.cursorYPositions = const {},
+    this.cursorXPositions = const {},
+    this.viewHeights = const {},
   });
 
   @override
@@ -66,6 +76,69 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
     });
   }
 
+  static const _minCharHeight = 6.0;
+
+  Widget _buildThumbnail(SshSessionInfo session) {
+    final image = widget.thumbnails[session.sessionId];
+    if (image == null) return const SizedBox.shrink();
+
+    final cursorYFrac = widget.cursorYPositions[session.sessionId] ?? 0.0;
+    final cursorXFrac = widget.cursorXPositions[session.sessionId] ?? 0.0;
+    final viewHeight = widget.viewHeights[session.sessionId] ?? 0;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final imageW = image.width.toDouble();
+        final imageH = image.height.toDouble();
+        final containerW = constraints.maxWidth;
+        final containerH = constraints.maxHeight;
+
+        // Scale image to fill container width
+        final scale = containerW / imageW;
+        final scaledH = imageH * scale;
+
+        // Character cell height in the scaled image
+        final cellHeight = viewHeight > 0 ? scaledH / viewHeight : 0.0;
+
+        // If characters would be too small, zoom in so they're at least
+        // _minCharHeight pixels tall
+        final extraZoom =
+            (cellHeight > 0 && cellHeight < _minCharHeight)
+                ? _minCharHeight / cellHeight
+                : 1.0;
+
+        final finalW = containerW * extraZoom;
+        final finalH = scaledH * extraZoom;
+
+        // Offset to center on cursor
+        final cursorPixelY = cursorYFrac * finalH;
+        final maxOffsetY = (finalH - containerH).clamp(0.0, double.infinity);
+        final targetY = (cursorPixelY - containerH / 2).clamp(0.0, maxOffsetY);
+
+        final cursorPixelX = cursorXFrac * finalW;
+        final maxOffsetX = (finalW - containerW).clamp(0.0, double.infinity);
+        final targetX = (cursorPixelX - containerW / 2).clamp(0.0, maxOffsetX);
+
+        return ClipRect(
+          child: OverflowBox(
+            maxWidth: finalW,
+            maxHeight: finalH,
+            alignment: Alignment.topLeft,
+            child: Transform.translate(
+              offset: Offset(-targetX, -targetY),
+              child: RawImage(
+                image: image,
+                width: finalW,
+                height: finalH,
+                fit: BoxFit.fill,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -107,6 +180,7 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
       itemBuilder: (context, i) {
         final session = widget.sessions[i];
         final isCurrent = i == widget.currentIndex;
+        final hasThumbnail = widget.thumbnails.containsKey(session.sessionId);
 
         return Dismissible(
           key: ValueKey(session.sessionId),
@@ -123,30 +197,41 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
                 ? theme.colorScheme.primaryContainer.withAlpha(80)
                 : Colors.transparent,
             child: ListTile(
-            leading: Icon(
-              Icons.terminal,
-              color: isCurrent
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.onSurfaceVariant,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              leading: hasThumbnail
+                  ? SizedBox(
+                      width: 64,
+                      height: 48,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: _buildThumbnail(session),
+                      ),
+                    )
+                  : Icon(
+                      Icons.terminal,
+                      color: isCurrent
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+              title: Text(
+                session.displayName,
+                overflow: TextOverflow.ellipsis,
+                style: isCurrent
+                    ? TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary)
+                    : null,
+              ),
+              subtitle: Text(
+                session.connectionType.label,
+                style: theme.textTheme.bodySmall,
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => _close(i),
+              ),
+              onTap: () => _switchTo(i),
             ),
-            title: Text(
-              session.displayName,
-              overflow: TextOverflow.ellipsis,
-              style: isCurrent
-                  ? TextStyle(fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.primary)
-                  : null,
-            ),
-            subtitle: Text(
-              session.connectionType.label,
-              style: theme.textTheme.bodySmall,
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.close, size: 20),
-              onPressed: () => _close(i),
-            ),
-            onTap: () => _switchTo(i),
-          ),
           ),
         );
       },
@@ -158,7 +243,7 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
       padding: const EdgeInsets.all(8).copyWith(bottom: 80),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        childAspectRatio: 1.0,
+        childAspectRatio: 0.75,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
       ),
@@ -224,29 +309,7 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
                   ),
                 ),
                 Expanded(
-                  child: Container(
-                    color: theme.colorScheme.surfaceContainerLow,
-                    alignment: Alignment.center,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.terminal,
-                          size: 40,
-                          color: theme.colorScheme.onSurfaceVariant
-                              .withAlpha(100),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          session.connectionType.label,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant
-                                .withAlpha(150),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  child: _buildThumbnail(session),
                 ),
               ],
             ),

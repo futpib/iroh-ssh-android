@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File, Platform;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:file_picker/file_picker.dart';
@@ -102,6 +103,25 @@ class TerminalTabState extends State<TerminalTab>
 
   void enableFocus() {
     _paneKey.currentState?.enableFocus();
+  }
+
+  Future<ui.Image?> captureImage({double pixelRatio = 1.0}) {
+    return _paneKey.currentState?.captureImage(pixelRatio: pixelRatio) ??
+        Future.value(null);
+  }
+
+  int get terminalViewHeight => _terminal.viewHeight;
+
+  double get cursorVerticalFraction {
+    final viewHeight = _terminal.viewHeight;
+    if (viewHeight <= 0) return 0.0;
+    return _terminal.buffer.cursorY / viewHeight;
+  }
+
+  double get cursorHorizontalFraction {
+    final viewWidth = _terminal.viewWidth;
+    if (viewWidth <= 0) return 0.0;
+    return _terminal.buffer.cursorX / viewWidth;
   }
 
   @override

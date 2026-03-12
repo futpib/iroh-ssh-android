@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:iroh_ssh_app/input_processor.dart';
 import 'package:xterm/xterm.dart';
 
@@ -46,6 +48,7 @@ class TerminalPane extends StatefulWidget {
 }
 
 class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderStateMixin {
+  final _repaintBoundaryKey = GlobalKey();
   late FocusNode _focusNode;
   final _input = InputProcessor();
   double? _terminalHeight;
@@ -82,6 +85,17 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
 
   void enableFocus() {
     _focusNode.canRequestFocus = true;
+  }
+
+  Future<ui.Image?> captureImage({double pixelRatio = 1.0}) async {
+    final boundary = _repaintBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null || boundary.debugNeedsPaint) return null;
+    try {
+      return await boundary.toImage(pixelRatio: pixelRatio);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -578,7 +592,9 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                       widget.onScalingChanged?.call(false);
                     }
                   },
-                  child: TerminalView(
+                  child: RepaintBoundary(
+                    key: _repaintBoundaryKey,
+                    child: TerminalView(
                     widget.terminal,
                     focusNode: _focusNode,
                     autofocus: widget.autofocus,
@@ -610,6 +626,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                         'sans-serif',
                       ],
                     ),
+                  ),
                   ),
                 ),
               ),
