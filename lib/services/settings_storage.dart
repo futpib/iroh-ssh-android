@@ -12,6 +12,7 @@ class AppSettings {
   final String terminalTheme;
   final String barPosition;
   final String tabViewStyle;
+  final String? lastConnectionType;
 
   AppSettings({
     this.useDefaultRelays = true,
@@ -21,6 +22,7 @@ class AppSettings {
     this.terminalTheme = 'default',
     this.barPosition = 'bottom',
     this.tabViewStyle = 'list',
+    this.lastConnectionType,
   });
 
   Map<String, dynamic> toJson() => {
@@ -32,6 +34,8 @@ class AppSettings {
         'terminalTheme': terminalTheme,
         'barPosition': barPosition,
         'tabViewStyle': tabViewStyle,
+        if (lastConnectionType != null)
+          'lastConnectionType': lastConnectionType,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -41,6 +45,7 @@ class AppSettings {
     final terminalTheme = json['terminalTheme'] as String? ?? 'default';
     final barPosition = json['barPosition'] as String? ?? 'bottom';
     final tabViewStyle = json['tabViewStyle'] as String? ?? 'list';
+    final lastConnectionType = json['lastConnectionType'] as String?;
 
     // Backwards compat: migrate old relayUrls/extraRelayUrls
     if (json.containsKey('useDefaultRelays')) {
@@ -53,6 +58,7 @@ class AppSettings {
         terminalTheme: terminalTheme,
         barPosition: barPosition,
         tabViewStyle: tabViewStyle,
+        lastConnectionType: lastConnectionType,
       );
     }
     final oldRelayUrls =
@@ -68,6 +74,7 @@ class AppSettings {
         terminalTheme: terminalTheme,
         barPosition: barPosition,
         tabViewStyle: tabViewStyle,
+        lastConnectionType: lastConnectionType,
       );
     }
     return AppSettings(

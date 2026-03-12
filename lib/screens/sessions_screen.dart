@@ -144,7 +144,10 @@ class _SessionsScreenState extends State<SessionsScreen>
   Future<void> _addSession() async {
     final result = await Navigator.of(context).push<SshSessionInfo>(
       MaterialPageRoute(
-        builder: (_) => const ConnectScreen(returnResult: true),
+        builder: (_) => ConnectScreen(
+          returnResult: true,
+          existingSessions: _sessions,
+        ),
       ),
     );
     if (result != null && mounted) {

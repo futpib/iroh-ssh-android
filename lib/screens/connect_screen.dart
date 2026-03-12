@@ -18,8 +18,13 @@ import 'package:iroh_ssh_app/widgets/network_settings_editor.dart';
 
 class ConnectScreen extends StatefulWidget {
   final bool returnResult;
+  final List<SshSessionInfo> existingSessions;
 
-  const ConnectScreen({super.key, this.returnResult = false});
+  const ConnectScreen({
+    super.key,
+    this.returnResult = false,
+    this.existingSessions = const [],
+  });
 
   @override
   State<ConnectScreen> createState() => _ConnectScreenState();
@@ -40,6 +45,52 @@ class _ConnectScreenState extends State<ConnectScreen> {
   void initState() {
     super.initState();
     _loadConnections();
+    _initConnectionType();
+  }
+
+  Future<void> _initConnectionType() async {
+    final type = await _computeDefaultConnectionType();
+    if (mounted) {
+      setState(() => _connectionType = type);
+    }
+  }
+
+  Future<ConnectionType> _computeDefaultConnectionType() async {
+    final sessions = widget.existingSessions;
+    if (sessions.isNotEmpty) {
+      final counts = <ConnectionType, int>{};
+      for (final s in sessions) {
+        counts[s.connectionType] = (counts[s.connectionType] ?? 0) + 1;
+      }
+      final threshold = (sessions.length * 2 / 3).ceil();
+      for (final entry in counts.entries) {
+        if (entry.value >= threshold) {
+          return entry.key;
+        }
+      }
+    }
+    final settings = await SettingsStorage.instance.load();
+    if (settings.lastConnectionType != null) {
+      return ConnectionType.values
+              .where((e) => e.name == settings.lastConnectionType)
+              .firstOrNull ??
+          ConnectionType.iroh;
+    }
+    return ConnectionType.iroh;
+  }
+
+  Future<void> _persistLastConnectionType(ConnectionType type) async {
+    final settings = await SettingsStorage.instance.load();
+    await SettingsStorage.instance.save(AppSettings(
+      useDefaultRelays: settings.useDefaultRelays,
+      customRelayUrls: settings.customRelayUrls,
+      maxRemoteNatTraversalAddresses: settings.maxRemoteNatTraversalAddresses,
+      terminalFontSize: settings.terminalFontSize,
+      terminalTheme: settings.terminalTheme,
+      barPosition: settings.barPosition,
+      tabViewStyle: settings.tabViewStyle,
+      lastConnectionType: type.name,
+    ));
   }
 
   Future<void> _loadConnections() async {
@@ -139,6 +190,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
       _connecting = true;
       _error = null;
     });
+
+    _persistLastConnectionType(connectionType);
 
     try {
       final keys = await KeyStorage.instance.listKeys();
