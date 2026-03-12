@@ -118,10 +118,11 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
             child: Icon(Icons.close, color: theme.colorScheme.onError),
           ),
           onDismissed: (_) => _close(i),
-          child: ListTile(
-            selected: isCurrent,
-            selectedTileColor:
-                theme.colorScheme.primaryContainer.withAlpha(80),
+          child: ColoredBox(
+            color: isCurrent
+                ? theme.colorScheme.primaryContainer.withAlpha(80)
+                : Colors.transparent,
+            child: ListTile(
             leading: Icon(
               Icons.terminal,
               color: isCurrent
@@ -145,6 +146,7 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
               onPressed: () => _close(i),
             ),
             onTap: () => _switchTo(i),
+          ),
           ),
         );
       },
