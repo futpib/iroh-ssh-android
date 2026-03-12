@@ -11,6 +11,7 @@ class AppSettings {
   final double terminalFontSize;
   final String terminalTheme;
   final String barPosition;
+  final String tabViewStyle;
 
   AppSettings({
     this.useDefaultRelays = true,
@@ -19,6 +20,7 @@ class AppSettings {
     this.terminalFontSize = 14.0,
     this.terminalTheme = 'default',
     this.barPosition = 'bottom',
+    this.tabViewStyle = 'list',
   });
 
   Map<String, dynamic> toJson() => {
@@ -29,6 +31,7 @@ class AppSettings {
         'terminalFontSize': terminalFontSize,
         'terminalTheme': terminalTheme,
         'barPosition': barPosition,
+        'tabViewStyle': tabViewStyle,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -37,6 +40,7 @@ class AppSettings {
         (json['terminalFontSize'] as num?)?.toDouble() ?? 14.0;
     final terminalTheme = json['terminalTheme'] as String? ?? 'default';
     final barPosition = json['barPosition'] as String? ?? 'bottom';
+    final tabViewStyle = json['tabViewStyle'] as String? ?? 'list';
 
     // Backwards compat: migrate old relayUrls/extraRelayUrls
     if (json.containsKey('useDefaultRelays')) {
@@ -48,6 +52,7 @@ class AppSettings {
         terminalFontSize: terminalFontSize,
         terminalTheme: terminalTheme,
         barPosition: barPosition,
+        tabViewStyle: tabViewStyle,
       );
     }
     final oldRelayUrls =
@@ -62,6 +67,7 @@ class AppSettings {
         terminalFontSize: terminalFontSize,
         terminalTheme: terminalTheme,
         barPosition: barPosition,
+        tabViewStyle: tabViewStyle,
       );
     }
     return AppSettings(

@@ -9,6 +9,7 @@ import 'package:iroh_ssh_app/screens/connect_screen.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
+import 'package:iroh_ssh_app/screens/tab_switcher_screen.dart';
 import 'package:iroh_ssh_app/widgets/terminal_pane.dart';
 import 'package:iroh_ssh_app/widgets/terminal_tab.dart';
 
@@ -38,6 +39,7 @@ class _SessionsScreenState extends State<SessionsScreen>
   double _terminalFontSize = 14.0;
   String _terminalTheme = 'default';
   String _barPosition = 'bottom';
+  String _tabViewStyle = 'list';
   double _barHideOffset = 0.0;
   final ValueNotifier<bool> _scalingNotifier = ValueNotifier(false);
   void Function(Object)? _serviceDataCallback;
@@ -101,6 +103,7 @@ class _SessionsScreenState extends State<SessionsScreen>
         _terminalFontSize = settings.terminalFontSize;
         _terminalTheme = settings.terminalTheme;
         _barPosition = settings.barPosition;
+        _tabViewStyle = settings.tabViewStyle;
       });
     }
   }
@@ -301,8 +304,7 @@ class _SessionsScreenState extends State<SessionsScreen>
                 onPressed: () => _showConnectionInfo(currentSession),
                 tooltip: 'Connection info',
               ),
-              if (_sessions.length > 1)
-                _buildTabCountButton(foregroundColor),
+              _buildTabCountButton(foregroundColor),
               IconButton(
                 icon: Icon(Icons.add, color: foregroundColor),
                 onPressed: _addSession,
@@ -342,21 +344,42 @@ class _SessionsScreenState extends State<SessionsScreen>
   void _showTabOverview() async {
     final tabState = _tabKeys[_sessions[_tabController.index].sessionId]?.currentState;
     tabState?.disableFocus();
-    final result = await showDialog<_TabAction>(
-      context: context,
-      builder: (ctx) => _TabOverviewDialog(
-        sessions: _sessions,
-        currentIndex: _tabController.index,
+    final result = await Navigator.of(context).push<TabSwitcherResult>(
+      MaterialPageRoute(
+        builder: (_) => TabSwitcherScreen(
+          sessions: _sessions,
+          currentIndex: _tabController.index,
+          viewStyle: _tabViewStyle,
+        ),
       ),
     );
     tabState?.enableFocus();
     if (result == null) return;
-    switch (result.action) {
-      case 'switch':
-        _tabController.animateTo(result.index);
-      case 'close':
-        _closeSession(result.index);
+    if (result.newViewStyle != null) {
+      _tabViewStyle = result.newViewStyle!;
+      _persistTabViewStyle();
     }
+    switch (result.action) {
+      case TabSwitcherAction.switchTo:
+        _tabController.animateTo(result.index);
+      case TabSwitcherAction.close:
+        _closeSession(result.index);
+      case TabSwitcherAction.add:
+        _addSession();
+    }
+  }
+
+  Future<void> _persistTabViewStyle() async {
+    final settings = await SettingsStorage.instance.load();
+    await SettingsStorage.instance.save(AppSettings(
+      useDefaultRelays: settings.useDefaultRelays,
+      customRelayUrls: settings.customRelayUrls,
+      maxRemoteNatTraversalAddresses: settings.maxRemoteNatTraversalAddresses,
+      terminalFontSize: settings.terminalFontSize,
+      terminalTheme: settings.terminalTheme,
+      barPosition: settings.barPosition,
+      tabViewStyle: _tabViewStyle,
+    ));
   }
 
 
@@ -450,62 +473,6 @@ class _SessionsScreenState extends State<SessionsScreen>
       return WithForegroundTask(child: scaffold);
     }
     return scaffold;
-  }
-}
-
-class _TabAction {
-  final String action;
-  final int index;
-  const _TabAction(this.action, this.index);
-}
-
-class _TabOverviewDialog extends StatelessWidget {
-  final List<SshSessionInfo> sessions;
-  final int currentIndex;
-
-  const _TabOverviewDialog({
-    required this.sessions,
-    required this.currentIndex,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Tabs'),
-      contentPadding: const EdgeInsets.only(top: 12),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: sessions.length,
-          itemBuilder: (ctx, i) {
-            final session = sessions[i];
-            final isCurrent = i == currentIndex;
-            return ListTile(
-              selected: isCurrent,
-              leading: Icon(
-                isCurrent ? Icons.terminal : Icons.tab,
-              ),
-              title: Text(session.displayName),
-              subtitle: Text(session.username),
-              trailing: IconButton(
-                icon: const Icon(Icons.close, size: 18),
-                onPressed: () =>
-                    Navigator.pop(ctx, _TabAction('close', i)),
-              ),
-              onTap: () =>
-                  Navigator.pop(ctx, _TabAction('switch', i)),
-            );
-          },
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-      ],
-    );
   }
 }
 
