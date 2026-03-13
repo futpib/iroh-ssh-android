@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:iroh_ssh_app/input_processor.dart';
 import 'package:xterm/xterm.dart';
 
@@ -313,7 +314,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
       _modifierButton('SHIFT', _input.shiftState, () {
         setState(() => _cycleModifier(_input.shiftState, (s) => _input.shiftState = s));
       }),
-      _modifierButton('PWD', _glideTyping ? ModifierState.off : ModifierState.locked, () {
+      _modifierButton('PSWRD', _glideTyping ? ModifierState.off : ModifierState.locked, () {
         setState(() => _glideTyping = !_glideTyping);
       }),
       _repeatableToolbarButton('HOME', () => _sendKey(TerminalKey.home)),
@@ -604,7 +605,13 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                     scrollPhysics: const NeverScrollableScrollPhysics(),
                     onCommitEditingState: _glideTyping ? _onCommitEditingState : null,
                     onInput: _onInput,
-                    keyboardType: _glideTyping ? TextInputType.emailAddress : TextInputType.visiblePassword,
+                    textInputConfiguration: TextInputConfiguration(
+                      inputType: _glideTyping ? TextInputType.text : TextInputType.visiblePassword,
+                      inputAction: TextInputAction.newline,
+                      keyboardAppearance: Brightness.dark,
+                      enableSuggestions: _glideTyping,
+                      autocorrect: _glideTyping,
+                    ),
                     theme: widget.theme,
                     textStyle: TerminalStyle(
                       fontSize: _currentFontSize,
