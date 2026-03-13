@@ -120,18 +120,25 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
         final targetX = (cursorPixelX - containerW / 2).clamp(0.0, maxOffsetX);
 
         return ClipRect(
-          child: OverflowBox(
-            maxWidth: finalW,
-            maxHeight: finalH,
-            alignment: Alignment.topLeft,
-            child: Transform.translate(
-              offset: Offset(-targetX, -targetY),
-              child: RawImage(
-                image: image,
-                width: finalW,
-                height: finalH,
-                fit: BoxFit.fill,
-              ),
+          child: SizedBox(
+            width: containerW,
+            height: containerH,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  left: -targetX,
+                  top: -targetY,
+                  width: finalW,
+                  height: finalH,
+                  child: RawImage(
+                    image: image,
+                    width: finalW,
+                    height: finalH,
+                    fit: BoxFit.fill,
+                  ),
+                ),
+              ],
             ),
           ),
         );
