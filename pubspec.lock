@@ -936,7 +936,7 @@ packages:
     description:
       path: "."
       ref: master
-      resolved-ref: "9db42a04beacb4d18ce74e3496350d836b470922"
+      resolved-ref: "777beec1873832e5aff49d3a5a32933f22e7a334"
       url: "https://github.com/futpib/xterm.dart"
     source: git
     version: "4.0.0"
