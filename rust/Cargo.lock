@@ -944,7 +944,35 @@ dependencies = [
  "console_error_panic_hook",
  "dart-sys",
  "delegate-attr",
- "flutter_rust_bridge_macros",
+ "flutter_rust_bridge_macros 2.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures",
+ "js-sys",
+ "lazy_static",
+ "log",
+ "oslog",
+ "portable-atomic",
+ "threadpool",
+ "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "flutter_rust_bridge"
+version = "2.11.1"
+source = "git+https://github.com/futpib/flutter_rust_bridge?branch=master#d0dc9b798e12ff6512430cf7c1be5525c0226d7c"
+dependencies = [
+ "allo-isolate",
+ "android_logger",
+ "anyhow",
+ "build-target",
+ "bytemuck",
+ "byteorder",
+ "console_error_panic_hook",
+ "dart-sys",
+ "delegate-attr",
+ "flutter_rust_bridge_macros 2.11.1 (git+https://github.com/futpib/flutter_rust_bridge?branch=master)",
  "futures",
  "js-sys",
  "lazy_static",
@@ -963,6 +991,18 @@ name = "flutter_rust_bridge_macros"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5f0420326b13675321b194928bb7830043b68cf8b810e1c651285c747abb080"
+dependencies = [
+ "hex",
+ "md-5",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "flutter_rust_bridge_macros"
+version = "2.11.1"
+source = "git+https://github.com/futpib/flutter_rust_bridge?branch=master#d0dc9b798e12ff6512430cf7c1be5525c0226d7c"
 dependencies = [
  "hex",
  "md-5",
@@ -1878,7 +1918,7 @@ source = "git+https://github.com/futpib/iroh-ssh?branch=flutter#a53bfcc4545ac79f
 dependencies = [
  "anyhow",
  "ed25519-dalek 2.2.0",
- "flutter_rust_bridge",
+ "flutter_rust_bridge 2.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "iroh",
  "rand",
  "tempfile",
@@ -1897,8 +1937,9 @@ name = "iroh_ssh_proxy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "flutter_rust_bridge",
+ "flutter_rust_bridge 2.11.1 (git+https://github.com/futpib/flutter_rust_bridge?branch=master)",
  "iroh-ssh",
+ "log",
  "tokio",
 ]
 

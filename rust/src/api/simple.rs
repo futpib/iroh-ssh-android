@@ -9,7 +9,11 @@ pub struct IrohConnectionInfo {
 
 #[frb(init)]
 pub fn init_app() {
-    flutter_rust_bridge::setup_default_user_utils();
+    flutter_rust_bridge::setup_default_user_utils_with_log_level(if cfg!(debug_assertions) {
+        log::LevelFilter::Trace
+    } else {
+        log::LevelFilter::Warn
+    });
 }
 
 /// Connect to a remote iroh-ssh endpoint.
