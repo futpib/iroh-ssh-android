@@ -91,7 +91,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   Future<ui.Image?> captureImage({double pixelRatio = 1.0}) async {
     final boundary = _repaintBoundaryKey.currentContext?.findRenderObject()
         as RenderRepaintBoundary?;
-    if (boundary == null || boundary.debugNeedsPaint) return null;
+    if (boundary == null) return null;
     try {
       return await boundary.toImage(pixelRatio: pixelRatio);
     } catch (_) {
