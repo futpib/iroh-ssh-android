@@ -48,6 +48,13 @@ jobs:
           echo "name=$(date -u +'%y.%m.%d.%H.%M')" >> "$GITHUB_OUTPUT"
           echo "code=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
+      - name: Build default (F-Droid) APK
+        env:
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/keystore.jks', runner.temp) || '' }}
+        run: |
+          flutter build apk --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+          mv build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/app-release-fdroid.apk"
+
       - name: Use ML Kit scanner
         run: cp lib/screens/qr_scanner_screen_mlkit.dart lib/screens/qr_scanner_screen.dart
 
@@ -56,10 +63,12 @@ jobs:
           KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/keystore.jks', runner.temp) || '' }}
         run: flutter build apk --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
 
-      - name: Upload APK to release
+      - name: Upload APKs to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}
           name: ${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}
           body: Built from ${{ github.sha }}.
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            ${{ runner.temp }}/app-release-fdroid.apk
