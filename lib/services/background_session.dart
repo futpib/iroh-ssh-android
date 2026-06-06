@@ -6,6 +6,10 @@ import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
+import 'package:iroh_ssh_app/models/tab_kind.dart';
+import 'package:iroh_ssh_app/services/fs/local_fs.dart';
+import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
+import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/terminal_replay_buffer.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
@@ -19,6 +23,7 @@ class BackgroundSession {
   int port;
   final List<SSHKeyPair> identities;
   final ConnectionType connectionType;
+  final TabKind kind;
 
   /// Connection parameters needed for reconnection.
   final String? endpointId;
@@ -33,6 +38,14 @@ class BackgroundSession {
   SSHClient? _client;
   SSHSession? _session;
   Pty? _pty;
+
+  /// File-manager backend (SFTP for iroh/ssh, local fs for local), set when
+  /// [kind] is [TabKind.files]. Null for terminal sessions.
+  RemoteFs? _fs;
+
+  /// In-flight SFTP transfers keyed by requestId, so a cancel can abort them.
+  final Map<String, StreamSubscription<int>> _activeTransfers = {};
+
   SessionState state = SessionState.connecting;
   final TerminalReplayBuffer replayBuffer = TerminalReplayBuffer();
   bool uiAttached = false;
@@ -65,6 +78,7 @@ class BackgroundSession {
     required this.port,
     required this.identities,
     this.connectionType = ConnectionType.iroh,
+    this.kind = TabKind.terminal,
     this.endpointId,
     this.relayUrls = const [],
     this.extraRelayUrls = const [],
@@ -79,7 +93,11 @@ class BackgroundSession {
       case ConnectionType.ssh:
         await _connectSsh();
       case ConnectionType.local:
-        _connectLocalShell();
+        if (kind == TabKind.files) {
+          _connectLocalFiles();
+        } else {
+          _connectLocalShell();
+        }
     }
   }
 
@@ -120,26 +138,34 @@ class BackgroundSession {
 
       _sendStatus('Authenticating...');
 
-      _session = await _client!.shell(
-        pty: SSHPtyConfig(width: 80, height: 24),
-      );
+      if (kind == TabKind.files) {
+        // Open an SFTP channel over the same authenticated connection instead
+        // of a shell. ShellReadyEvent doubles as the "fs ready" signal.
+        _fs = SftpFs(await _client!.sftp());
+        state = SessionState.connected;
+        _sendShellReady();
+      } else {
+        _session = await _client!.shell(
+          pty: SSHPtyConfig(width: 80, height: 24),
+        );
 
-      state = SessionState.connected;
-      _sendShellReady();
+        state = SessionState.connected;
+        _sendShellReady();
 
-      _session!.stdout.listen((data) {
-        _stdoutBuffer.add(data);
-        _stdoutFlushTimer ??= Timer(_batchDuration, _flushStdout);
-      });
+        _session!.stdout.listen((data) {
+          _stdoutBuffer.add(data);
+          _stdoutFlushTimer ??= Timer(_batchDuration, _flushStdout);
+        });
 
-      _session!.stderr.listen((data) {
-        _stderrBuffer.add(data);
-        _stderrFlushTimer ??= Timer(_batchDuration, _flushStderr);
-      });
+        _session!.stderr.listen((data) {
+          _stderrBuffer.add(data);
+          _stderrFlushTimer ??= Timer(_batchDuration, _flushStderr);
+        });
 
-      _session!.done.then((_) {
-        disconnect(reason: 'Session ended');
-      });
+        _session!.done.then((_) {
+          disconnect(reason: 'Session ended');
+        });
+      }
     } catch (e) {
       final errorMsg = '\r\nError: $e\r\n';
       final bytes = utf8.encode(errorMsg);
@@ -177,6 +203,136 @@ class BackgroundSession {
       state = SessionState.disconnected;
       _sendError(e.toString());
     }
+  }
+
+  void _connectLocalFiles() {
+    state = SessionState.connecting;
+    _sendStatus('Opening local files...');
+    _fs = LocalFs();
+    state = SessionState.connected;
+    _sendShellReady();
+  }
+
+  // =========================================================================
+  // SFTP / file-manager command handling
+  // =========================================================================
+
+  /// Dispatch an SFTP command (routed here by the service) to [_fs] and stream
+  /// results/progress/errors back to the UI, correlated by requestId.
+  Future<void> handleSftp(ServiceCommand command) async {
+    switch (command) {
+      case SftpListCommand():
+        await _sftpGuarded(command.requestId, () async {
+          final entries = await _fs!.list(command.path);
+          _sendSftp(SftpListResultEvent(
+            sessionId: sessionId,
+            requestId: command.requestId,
+            entries: entries,
+          ));
+        });
+      case SftpStatCommand():
+        await _sftpGuarded(command.requestId, () async {
+          final entry = await _fs!.stat(command.path);
+          _sendSftp(SftpStatResultEvent(
+            sessionId: sessionId,
+            requestId: command.requestId,
+            entry: entry,
+          ));
+        });
+      case SftpMkdirCommand():
+        await _sftpOk(command.requestId, () => _fs!.mkdir(command.path));
+      case SftpRenameCommand():
+        await _sftpOk(
+            command.requestId, () => _fs!.rename(command.from, command.to));
+      case SftpRemoveCommand():
+        await _sftpOk(command.requestId,
+            () => _fs!.remove(command.path, recursive: command.recursive));
+      case SftpDownloadCommand():
+        _sftpTransfer(command.requestId,
+            () => _fs!.download(command.remotePath, command.localPath));
+      case SftpUploadCommand():
+        _sftpTransfer(command.requestId,
+            () => _fs!.upload(command.localPath, command.remotePath));
+      case SftpInitialDirCommand():
+        await _sftpGuarded(command.requestId, () async {
+          final dir = await _fs!.initialDir();
+          _sendSftp(SftpPathResultEvent(
+            sessionId: sessionId,
+            requestId: command.requestId,
+            path: dir,
+          ));
+        });
+      case SftpCancelCommand():
+        await _activeTransfers.remove(command.requestId)?.cancel();
+      default:
+        break;
+    }
+  }
+
+  void _sendSftp(ServiceEvent event) {
+    if (onSendToUi != null) onSendToUi!(event.encode());
+  }
+
+  Future<void> _sftpGuarded(
+      String requestId, Future<void> Function() op) async {
+    if (_fs == null) {
+      _sendSftp(SftpErrorEvent(
+        sessionId: sessionId,
+        requestId: requestId,
+        message: 'File manager not ready',
+      ));
+      return;
+    }
+    try {
+      await op();
+    } catch (e) {
+      _sendSftp(SftpErrorEvent(
+        sessionId: sessionId,
+        requestId: requestId,
+        message: e.toString(),
+      ));
+    }
+  }
+
+  Future<void> _sftpOk(String requestId, Future<void> Function() op) async {
+    await _sftpGuarded(requestId, () async {
+      await op();
+      _sendSftp(SftpOkEvent(sessionId: sessionId, requestId: requestId));
+    });
+  }
+
+  void _sftpTransfer(String requestId, Stream<int> Function() open) {
+    if (_fs == null) {
+      _sendSftp(SftpErrorEvent(
+        sessionId: sessionId,
+        requestId: requestId,
+        message: 'File manager not ready',
+      ));
+      return;
+    }
+    final sub = open().listen(
+      (transferred) {
+        _sendSftp(SftpProgressEvent(
+          sessionId: sessionId,
+          requestId: requestId,
+          transferred: transferred,
+        ));
+      },
+      onError: (e) {
+        _activeTransfers.remove(requestId);
+        _sendSftp(SftpErrorEvent(
+          sessionId: sessionId,
+          requestId: requestId,
+          message: e.toString(),
+        ));
+      },
+      onDone: () {
+        _activeTransfers.remove(requestId);
+        _sendSftp(SftpDoneEvent(sessionId: sessionId, requestId: requestId));
+      },
+      cancelOnError: true,
+    );
+    _activeTransfers[requestId] = sub;
   }
 
   void _flushStdout() {
@@ -292,6 +448,12 @@ class BackgroundSession {
     _ptyOutputSubscription = null;
     _pty?.kill();
     _pty = null;
+    for (final sub in _activeTransfers.values) {
+      sub.cancel();
+    }
+    _activeTransfers.clear();
+    await _fs?.close();
+    _fs = null;
     _session?.close();
     _client?.close();
     _session = null;
@@ -336,6 +498,12 @@ class BackgroundSession {
     _ptyOutputSubscription = null;
     _pty?.kill();
     _pty = null;
+    for (final sub in _activeTransfers.values) {
+      sub.cancel();
+    }
+    _activeTransfers.clear();
+    await _fs?.close();
+    _fs = null;
     _session?.close();
     _client?.close();
     if (connectionType == ConnectionType.iroh) {

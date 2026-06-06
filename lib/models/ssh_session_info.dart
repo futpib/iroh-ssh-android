@@ -1,4 +1,5 @@
 import 'package:iroh_ssh_app/models/connection_type.dart';
+import 'package:iroh_ssh_app/models/tab_kind.dart';
 
 class SshSessionInfo {
   final String sessionId;
@@ -8,6 +9,7 @@ class SshSessionInfo {
   final List<String> keyNames;
   final String displayName;
   final ConnectionType connectionType;
+  final TabKind kind;
 
   const SshSessionInfo({
     required this.sessionId,
@@ -17,6 +19,7 @@ class SshSessionInfo {
     this.keyNames = const [],
     required this.displayName,
     this.connectionType = ConnectionType.iroh,
+    this.kind = TabKind.terminal,
   });
 
   Map<String, dynamic> toJson() => {
@@ -27,6 +30,7 @@ class SshSessionInfo {
         'keyNames': keyNames,
         'displayName': displayName,
         'connectionType': connectionType.name,
+        'kind': kind.name,
       };
 
   factory SshSessionInfo.fromJson(Map<String, dynamic> json) => SshSessionInfo(
@@ -37,6 +41,7 @@ class SshSessionInfo {
         keyNames: (json['keyNames'] as List?)?.cast<String>() ?? [],
         displayName: json['displayName'] as String,
         connectionType: _parseConnectionType(json['connectionType'] as String?),
+        kind: TabKind.parse(json['kind'] as String?),
       );
 
   static ConnectionType _parseConnectionType(String? value) {

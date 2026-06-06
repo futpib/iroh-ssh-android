@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:iroh_ssh_app/models/connection_type.dart';
+import 'package:iroh_ssh_app/models/fs_entry.dart';
+import 'package:iroh_ssh_app/models/tab_kind.dart';
 
 // ---------------------------------------------------------------------------
 // UI → Service messages
@@ -23,6 +25,15 @@ sealed class ServiceCommand {
       'list_sessions' => ListSessionsCommand(),
       'auth_response' => AuthResponseCommand.fromJson(json),
       'reconnect' => ReconnectCommand.fromJson(json),
+      'sftp_list' => SftpListCommand.fromJson(json),
+      'sftp_stat' => SftpStatCommand.fromJson(json),
+      'sftp_mkdir' => SftpMkdirCommand.fromJson(json),
+      'sftp_rename' => SftpRenameCommand.fromJson(json),
+      'sftp_remove' => SftpRemoveCommand.fromJson(json),
+      'sftp_download' => SftpDownloadCommand.fromJson(json),
+      'sftp_upload' => SftpUploadCommand.fromJson(json),
+      'sftp_cancel' => SftpCancelCommand.fromJson(json),
+      'sftp_initial_dir' => SftpInitialDirCommand.fromJson(json),
       _ => throw ArgumentError('Unknown command type: ${json['type']}'),
     };
   }
@@ -30,6 +41,7 @@ sealed class ServiceCommand {
 
 class ConnectCommand extends ServiceCommand {
   final ConnectionType connectionType;
+  final TabKind kind;
   final String? endpointId;
   final String username;
   final String displayName;
@@ -42,6 +54,7 @@ class ConnectCommand extends ServiceCommand {
 
   ConnectCommand({
     this.connectionType = ConnectionType.iroh,
+    this.kind = TabKind.terminal,
     this.endpointId,
     required this.username,
     required this.displayName,
@@ -57,6 +70,7 @@ class ConnectCommand extends ServiceCommand {
   Map<String, dynamic> toJson() => {
         'type': 'connect',
         'connectionType': connectionType.name,
+        'kind': kind.name,
         if (endpointId != null) 'endpointId': endpointId,
         'username': username,
         'displayName': displayName,
@@ -71,6 +85,7 @@ class ConnectCommand extends ServiceCommand {
 
   factory ConnectCommand.fromJson(Map<String, dynamic> json) => ConnectCommand(
         connectionType: _parseConnectionType(json['connectionType'] as String?),
+        kind: TabKind.parse(json['kind'] as String?),
         endpointId: json['endpointId'] as String?,
         username: json['username'] as String,
         displayName: json['displayName'] as String,
@@ -223,6 +238,264 @@ class AuthResponseCommand extends ServiceCommand {
 }
 
 // ---------------------------------------------------------------------------
+// SFTP file-manager commands (UI → service)
+//
+// Each carries a `requestId` so the UI can correlate the matching response
+// event. File contents never cross this channel — only paths + progress.
+// ---------------------------------------------------------------------------
+
+class SftpListCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+  final String path;
+
+  SftpListCommand({
+    required this.sessionId,
+    required this.requestId,
+    required this.path,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_list',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'path': path,
+      };
+
+  factory SftpListCommand.fromJson(Map<String, dynamic> json) =>
+      SftpListCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        path: json['path'] as String,
+      );
+}
+
+class SftpStatCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+  final String path;
+
+  SftpStatCommand({
+    required this.sessionId,
+    required this.requestId,
+    required this.path,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_stat',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'path': path,
+      };
+
+  factory SftpStatCommand.fromJson(Map<String, dynamic> json) =>
+      SftpStatCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        path: json['path'] as String,
+      );
+}
+
+class SftpMkdirCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+  final String path;
+
+  SftpMkdirCommand({
+    required this.sessionId,
+    required this.requestId,
+    required this.path,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_mkdir',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'path': path,
+      };
+
+  factory SftpMkdirCommand.fromJson(Map<String, dynamic> json) =>
+      SftpMkdirCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        path: json['path'] as String,
+      );
+}
+
+class SftpRenameCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+  final String from;
+  final String to;
+
+  SftpRenameCommand({
+    required this.sessionId,
+    required this.requestId,
+    required this.from,
+    required this.to,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_rename',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'from': from,
+        'to': to,
+      };
+
+  factory SftpRenameCommand.fromJson(Map<String, dynamic> json) =>
+      SftpRenameCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        from: json['from'] as String,
+        to: json['to'] as String,
+      );
+}
+
+class SftpRemoveCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+  final String path;
+  final bool recursive;
+
+  SftpRemoveCommand({
+    required this.sessionId,
+    required this.requestId,
+    required this.path,
+    this.recursive = false,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_remove',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'path': path,
+        'recursive': recursive,
+      };
+
+  factory SftpRemoveCommand.fromJson(Map<String, dynamic> json) =>
+      SftpRemoveCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        path: json['path'] as String,
+        recursive: json['recursive'] as bool? ?? false,
+      );
+}
+
+class SftpDownloadCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+  final String remotePath;
+  final String localPath;
+
+  SftpDownloadCommand({
+    required this.sessionId,
+    required this.requestId,
+    required this.remotePath,
+    required this.localPath,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_download',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'remotePath': remotePath,
+        'localPath': localPath,
+      };
+
+  factory SftpDownloadCommand.fromJson(Map<String, dynamic> json) =>
+      SftpDownloadCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        remotePath: json['remotePath'] as String,
+        localPath: json['localPath'] as String,
+      );
+}
+
+class SftpUploadCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+  final String localPath;
+  final String remotePath;
+
+  SftpUploadCommand({
+    required this.sessionId,
+    required this.requestId,
+    required this.localPath,
+    required this.remotePath,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_upload',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'localPath': localPath,
+        'remotePath': remotePath,
+      };
+
+  factory SftpUploadCommand.fromJson(Map<String, dynamic> json) =>
+      SftpUploadCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        localPath: json['localPath'] as String,
+        remotePath: json['remotePath'] as String,
+      );
+}
+
+class SftpCancelCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+
+  SftpCancelCommand({
+    required this.sessionId,
+    required this.requestId,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_cancel',
+        'sessionId': sessionId,
+        'requestId': requestId,
+      };
+
+  factory SftpCancelCommand.fromJson(Map<String, dynamic> json) =>
+      SftpCancelCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+      );
+}
+
+class SftpInitialDirCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+
+  SftpInitialDirCommand({
+    required this.sessionId,
+    required this.requestId,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_initial_dir',
+        'sessionId': sessionId,
+        'requestId': requestId,
+      };
+
+  factory SftpInitialDirCommand.fromJson(Map<String, dynamic> json) =>
+      SftpInitialDirCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+      );
+}
+
+// ---------------------------------------------------------------------------
 // Service → UI messages
 // ---------------------------------------------------------------------------
 
@@ -243,6 +516,13 @@ sealed class ServiceEvent {
       'error' => ErrorEvent.fromJson(json),
       'status' => StatusEvent.fromJson(json),
       'shell_ready' => ShellReadyEvent.fromJson(json),
+      'sftp_list_result' => SftpListResultEvent.fromJson(json),
+      'sftp_stat_result' => SftpStatResultEvent.fromJson(json),
+      'sftp_path_result' => SftpPathResultEvent.fromJson(json),
+      'sftp_ok' => SftpOkEvent.fromJson(json),
+      'sftp_progress' => SftpProgressEvent.fromJson(json),
+      'sftp_done' => SftpDoneEvent.fromJson(json),
+      'sftp_error' => SftpErrorEvent.fromJson(json),
       _ => throw ArgumentError('Unknown event type: ${json['type']}'),
     };
   }
@@ -254,6 +534,7 @@ class ConnectedEvent extends ServiceEvent {
   final String username;
   final int port;
   final ConnectionType connectionType;
+  final TabKind kind;
   final String? host;
 
   ConnectedEvent({
@@ -262,6 +543,7 @@ class ConnectedEvent extends ServiceEvent {
     required this.username,
     required this.port,
     this.connectionType = ConnectionType.iroh,
+    this.kind = TabKind.terminal,
     this.host,
   });
 
@@ -273,6 +555,7 @@ class ConnectedEvent extends ServiceEvent {
         'username': username,
         'port': port,
         'connectionType': connectionType.name,
+        'kind': kind.name,
         if (host != null) 'host': host,
       };
 
@@ -282,6 +565,7 @@ class ConnectedEvent extends ServiceEvent {
         username: json['username'] as String,
         port: json['port'] as int,
         connectionType: _parseConnectionType(json['connectionType'] as String?),
+        kind: TabKind.parse(json['kind'] as String?),
         host: json['host'] as String?,
       );
 
@@ -356,6 +640,7 @@ class SessionSummary {
   final String username;
   final int port;
   final String state;
+  final TabKind kind;
 
   SessionSummary({
     required this.sessionId,
@@ -363,6 +648,7 @@ class SessionSummary {
     required this.username,
     required this.port,
     required this.state,
+    this.kind = TabKind.terminal,
   });
 
   Map<String, dynamic> toJson() => {
@@ -371,6 +657,7 @@ class SessionSummary {
         'username': username,
         'port': port,
         'state': state,
+        'kind': kind.name,
       };
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
@@ -379,6 +666,7 @@ class SessionSummary {
         username: json['username'] as String,
         port: json['port'] as int,
         state: json['state'] as String,
+        kind: TabKind.parse(json['kind'] as String?),
       );
 }
 
@@ -479,4 +767,186 @@ class ShellReadyEvent extends ServiceEvent {
 
   factory ShellReadyEvent.fromJson(Map<String, dynamic> json) =>
       ShellReadyEvent(sessionId: json['sessionId'] as String);
+}
+
+// ---------------------------------------------------------------------------
+// SFTP file-manager events (service → UI), correlated by `requestId`.
+// ---------------------------------------------------------------------------
+
+class SftpListResultEvent extends ServiceEvent {
+  final String sessionId;
+  final String requestId;
+  final List<FsEntry> entries;
+
+  SftpListResultEvent({
+    required this.sessionId,
+    required this.requestId,
+    required this.entries,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_list_result',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'entries': entries.map((e) => e.toJson()).toList(),
+      };
+
+  factory SftpListResultEvent.fromJson(Map<String, dynamic> json) =>
+      SftpListResultEvent(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        entries: (json['entries'] as List)
+            .map((e) => FsEntry.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class SftpPathResultEvent extends ServiceEvent {
+  final String sessionId;
+  final String requestId;
+  final String path;
+
+  SftpPathResultEvent({
+    required this.sessionId,
+    required this.requestId,
+    required this.path,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_path_result',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'path': path,
+      };
+
+  factory SftpPathResultEvent.fromJson(Map<String, dynamic> json) =>
+      SftpPathResultEvent(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        path: json['path'] as String,
+      );
+}
+
+class SftpStatResultEvent extends ServiceEvent {
+  final String sessionId;
+  final String requestId;
+  final FsEntry entry;
+
+  SftpStatResultEvent({
+    required this.sessionId,
+    required this.requestId,
+    required this.entry,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_stat_result',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'entry': entry.toJson(),
+      };
+
+  factory SftpStatResultEvent.fromJson(Map<String, dynamic> json) =>
+      SftpStatResultEvent(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        entry: FsEntry.fromJson(json['entry'] as Map<String, dynamic>),
+      );
+}
+
+class SftpOkEvent extends ServiceEvent {
+  final String sessionId;
+  final String requestId;
+
+  SftpOkEvent({required this.sessionId, required this.requestId});
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_ok',
+        'sessionId': sessionId,
+        'requestId': requestId,
+      };
+
+  factory SftpOkEvent.fromJson(Map<String, dynamic> json) => SftpOkEvent(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+      );
+}
+
+class SftpProgressEvent extends ServiceEvent {
+  final String sessionId;
+  final String requestId;
+  final int transferred;
+  final int? total;
+
+  SftpProgressEvent({
+    required this.sessionId,
+    required this.requestId,
+    required this.transferred,
+    this.total,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_progress',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'transferred': transferred,
+        if (total != null) 'total': total,
+      };
+
+  factory SftpProgressEvent.fromJson(Map<String, dynamic> json) =>
+      SftpProgressEvent(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        transferred: json['transferred'] as int,
+        total: json['total'] as int?,
+      );
+}
+
+class SftpDoneEvent extends ServiceEvent {
+  final String sessionId;
+  final String requestId;
+
+  SftpDoneEvent({required this.sessionId, required this.requestId});
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_done',
+        'sessionId': sessionId,
+        'requestId': requestId,
+      };
+
+  factory SftpDoneEvent.fromJson(Map<String, dynamic> json) => SftpDoneEvent(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+      );
+}
+
+class SftpErrorEvent extends ServiceEvent {
+  final String sessionId;
+  final String requestId;
+  final String message;
+
+  SftpErrorEvent({
+    required this.sessionId,
+    required this.requestId,
+    required this.message,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'sftp_error',
+        'sessionId': sessionId,
+        'requestId': requestId,
+        'message': message,
+      };
+
+  factory SftpErrorEvent.fromJson(Map<String, dynamic> json) => SftpErrorEvent(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        message: json['message'] as String,
+      );
 }

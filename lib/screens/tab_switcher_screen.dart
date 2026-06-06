@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
+import 'package:iroh_ssh_app/models/tab_kind.dart';
 
 enum TabSwitcherAction { switchTo, close, add }
 
@@ -215,7 +216,9 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
                       ),
                     )
                   : Icon(
-                      Icons.terminal,
+                      session.kind == TabKind.files
+                          ? Icons.folder
+                          : Icons.terminal,
                       color: isCurrent
                           ? theme.colorScheme.primary
                           : theme.colorScheme.onSurfaceVariant,
@@ -282,7 +285,9 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
                   child: Row(
                     children: [
                       Icon(
-                        Icons.terminal,
+                        session.kind == TabKind.files
+                            ? Icons.folder
+                            : Icons.terminal,
                         size: 16,
                         color: isCurrent
                             ? theme.colorScheme.primary

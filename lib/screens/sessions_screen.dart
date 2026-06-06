@@ -6,11 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
+import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/screens/connect_screen.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/screens/tab_switcher_screen.dart';
+import 'package:iroh_ssh_app/widgets/file_manager_tab.dart';
+import 'package:iroh_ssh_app/widgets/session_tab_controller.dart';
+import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/widgets/terminal_pane.dart';
 import 'package:iroh_ssh_app/widgets/terminal_tab.dart';
 
@@ -20,10 +24,15 @@ class SessionsScreen extends StatefulWidget {
   @visibleForTesting
   final bool connectOnInit;
 
+  /// Test-only fake filesystem handed to any file-manager tabs.
+  @visibleForTesting
+  final RemoteFs? testFs;
+
   const SessionsScreen({
     super.key,
     required this.existingSessions,
     this.connectOnInit = true,
+    this.testFs,
   });
 
   @override
@@ -36,7 +45,7 @@ class _SessionsScreenState extends State<SessionsScreen>
 
   late List<SshSessionInfo> _sessions;
   late TabController _tabController;
-  final Map<String, GlobalKey<TerminalTabState>> _tabKeys = {};
+  final Map<String, GlobalKey<State>> _tabKeys = {};
   double _terminalFontSize = 14.0;
   String _terminalTheme = 'default';
   String _barPosition = 'bottom';
@@ -57,7 +66,7 @@ class _SessionsScreenState extends State<SessionsScreen>
     _tabController = TabController(length: _sessions.length, vsync: this);
     _tabController.addListener(_onTabChanged);
     for (final session in _sessions) {
-      _tabKeys[session.sessionId] = GlobalKey<TerminalTabState>();
+      _tabKeys[session.sessionId] = GlobalKey<State>();
     }
     _loadTerminalSettings();
     if (_isAndroid) {
@@ -122,7 +131,8 @@ class _SessionsScreenState extends State<SessionsScreen>
       final session = _sessions[_tabController.index];
       final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
       if (keyboardOpen || !_isAndroid) {
-        _tabKeys[session.sessionId]?.currentState?.requestFocus();
+        (_tabKeys[session.sessionId]?.currentState as SessionTabController?)
+            ?.requestFocus();
       }
       setState(() {});
     }
@@ -132,7 +142,8 @@ class _SessionsScreenState extends State<SessionsScreen>
     if (index < 0 || index >= _sessions.length) return;
     final session = _sessions[index];
     final state = _tabKeys[session.sessionId]?.currentState;
-    if (state == null) return;
+    // Only terminal tabs produce thumbnails; file-manager tabs are skipped.
+    if (state is! TerminalTabState) return;
     _cursorYCache[session.sessionId] = state.cursorVerticalFraction;
     _cursorXCache[session.sessionId] = state.cursorHorizontalFraction;
     _viewHeightCache[session.sessionId] = state.terminalViewHeight;
@@ -179,7 +190,7 @@ class _SessionsScreenState extends State<SessionsScreen>
     if (result != null && mounted) {
       setState(() {
         _sessions.add(result);
-        _tabKeys[result.sessionId] = GlobalKey<TerminalTabState>();
+        _tabKeys[result.sessionId] = GlobalKey<State>();
         _rebuildTabController(_sessions.length,
             newIndex: _sessions.length - 1);
       });
@@ -219,7 +230,8 @@ class _SessionsScreenState extends State<SessionsScreen>
   }
 
   Future<void> _showConnectionInfo(SshSessionInfo session) async {
-    final tabState = _tabKeys[session.sessionId]?.currentState;
+    final tabState =
+        _tabKeys[session.sessionId]?.currentState as SessionTabController?;
     tabState?.disableFocus();
     await showDialog(
       context: context,
@@ -233,7 +245,8 @@ class _SessionsScreenState extends State<SessionsScreen>
 
     if (_isAndroid) {
       final hasReadySessions = _sessions.any((session) {
-        final tabState = _tabKeys[session.sessionId]?.currentState;
+        final tabState =
+            _tabKeys[session.sessionId]?.currentState as SessionTabController?;
         return tabState != null && tabState.shellReady;
       });
 
@@ -378,7 +391,8 @@ class _SessionsScreenState extends State<SessionsScreen>
     // Capture the current (visible) tab before dismissing keyboard
     _captureTab(_tabController.index);
 
-    final tabState = _tabKeys[_sessions[_tabController.index].sessionId]?.currentState;
+    final tabState = _tabKeys[_sessions[_tabController.index].sessionId]
+        ?.currentState as SessionTabController?;
     tabState?.disableFocus();
 
     // Wait for the paint pass after keyboard dismissal / layout change
@@ -388,7 +402,7 @@ class _SessionsScreenState extends State<SessionsScreen>
     // Try to capture current tab again after layout settles (without keyboard)
     final currentSession = _sessions[_tabController.index];
     final currentState = _tabKeys[currentSession.sessionId]?.currentState;
-    if (currentState != null) {
+    if (currentState is TerminalTabState) {
       final pixelRatio = MediaQuery.of(context).devicePixelRatio;
       final captureRatio = (pixelRatio * 0.5).clamp(0.5, 1.5);
       final image = await currentState.captureImage(pixelRatio: captureRatio);
@@ -462,6 +476,12 @@ class _SessionsScreenState extends State<SessionsScreen>
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
+        // Let the active tab consume Back first (file manager → navigate up).
+        if (_sessions.isNotEmpty) {
+          final active = _tabKeys[_sessions[_tabController.index].sessionId]
+              ?.currentState as SessionTabController?;
+          if (active != null && active.handleBack()) return;
+        }
         if (await _onWillPop()) {
           if (context.mounted) {
             Navigator.of(context).pop();
@@ -483,22 +503,31 @@ class _SessionsScreenState extends State<SessionsScreen>
               physics: ScaleAwareScrollPhysics(_scalingNotifier),
               children: List.generate(_sessions.length, (i) {
                 final session = _sessions[i];
-                final terminalTab = TerminalTab(
-                  key: _tabKeys[session.sessionId],
-                  session: session,
-                  onDisconnected: () => _closeSession(i),
-                  connectOnInit: widget.connectOnInit,
-                  fontSize: _terminalFontSize,
-                  themeName: _terminalTheme,
-                  onScalingChanged: (scaling) {
-                    _scalingNotifier.value = scaling;
-                  },
-                  onVerticalScrollDelta: (delta) {
-                    setState(() {
-                      _barHideOffset = (_barHideOffset - delta).clamp(0.0, barHeight);
-                    });
-                  },
-                );
+                final Widget tabContent = session.kind == TabKind.files
+                    ? FileManagerTab(
+                        key: _tabKeys[session.sessionId],
+                        session: session,
+                        onDisconnected: () => _closeSession(i),
+                        connectOnInit: widget.connectOnInit,
+                        testFs: widget.testFs,
+                      )
+                    : TerminalTab(
+                        key: _tabKeys[session.sessionId],
+                        session: session,
+                        onDisconnected: () => _closeSession(i),
+                        connectOnInit: widget.connectOnInit,
+                        fontSize: _terminalFontSize,
+                        themeName: _terminalTheme,
+                        onScalingChanged: (scaling) {
+                          _scalingNotifier.value = scaling;
+                        },
+                        onVerticalScrollDelta: (delta) {
+                          setState(() {
+                            _barHideOffset = (_barHideOffset - delta)
+                                .clamp(0.0, barHeight);
+                          });
+                        },
+                      );
                 return Stack(
                   children: [
                     Positioned.fill(
@@ -507,7 +536,7 @@ class _SessionsScreenState extends State<SessionsScreen>
                           top: isTop ? barHeight - barShift : 0,
                           bottom: !isTop ? barHeight - barShift : 0,
                         ),
-                        child: terminalTab,
+                        child: tabContent,
                       ),
                     ),
                     if (!keyboardOpen)

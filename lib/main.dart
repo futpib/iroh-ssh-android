@@ -61,6 +61,7 @@ class _IrohSshAppState extends State<IrohSshApp> {
                       port: s.port,
                       username: s.username,
                       displayName: s.displayName,
+                      kind: s.kind,
                     ))
                 .toList();
             if (!completer.isCompleted) {

@@ -53,6 +53,16 @@ class SshSessionService extends TaskHandler {
         _handleListSessions();
       case AuthResponseCommand():
         _handleAuthResponse(command);
+      case SftpListCommand() ||
+            SftpStatCommand() ||
+            SftpMkdirCommand() ||
+            SftpRenameCommand() ||
+            SftpRemoveCommand() ||
+            SftpDownloadCommand() ||
+            SftpUploadCommand() ||
+            SftpInitialDirCommand() ||
+            SftpCancelCommand():
+        _handleSftp(command);
     }
   }
 
@@ -98,6 +108,7 @@ class SshSessionService extends TaskHandler {
       port: port,
       identities: identities,
       connectionType: ConnectionType.iroh,
+      kind: command.kind,
       endpointId: command.endpointId,
       relayUrls: command.relayUrls,
       extraRelayUrls: command.extraRelayUrls,
@@ -122,6 +133,7 @@ class SshSessionService extends TaskHandler {
       port: command.sshPort ?? 22,
       identities: identities,
       connectionType: ConnectionType.ssh,
+      kind: command.kind,
       sshHost: command.host,
       sshPort: command.sshPort ?? 22,
     );
@@ -137,6 +149,7 @@ class SshSessionService extends TaskHandler {
       port: 0,
       identities: [],
       connectionType: ConnectionType.local,
+      kind: command.kind,
     );
 
     _startSession(sessionId, session, command);
@@ -154,6 +167,7 @@ class SshSessionService extends TaskHandler {
       username: command.username,
       port: session.port,
       connectionType: command.connectionType,
+      kind: command.kind,
       host: command.host,
     ).encode());
 
@@ -236,6 +250,7 @@ class SshSessionService extends TaskHandler {
           username: s.username,
           port: s.port,
           state: s.state.name,
+          kind: s.kind,
         )).toList();
     _sendToUi(SessionListEvent(sessions: summaries).encode());
   }
@@ -244,6 +259,23 @@ class SshSessionService extends TaskHandler {
     final session = _sessions[command.sessionId];
     if (session == null) return;
     session.handleAuthResponse(command.response);
+  }
+
+  void _handleSftp(ServiceCommand command) {
+    final sessionId = switch (command) {
+      SftpListCommand() => command.sessionId,
+      SftpStatCommand() => command.sessionId,
+      SftpMkdirCommand() => command.sessionId,
+      SftpRenameCommand() => command.sessionId,
+      SftpRemoveCommand() => command.sessionId,
+      SftpDownloadCommand() => command.sessionId,
+      SftpUploadCommand() => command.sessionId,
+      SftpInitialDirCommand() => command.sessionId,
+      SftpCancelCommand() => command.sessionId,
+      _ => null,
+    };
+    if (sessionId == null) return;
+    _sessions[sessionId]?.handleSftp(command);
   }
 
   void _removeSession(String sessionId) {

@@ -15,6 +15,7 @@ import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
+import 'package:iroh_ssh_app/widgets/session_tab_controller.dart';
 import 'package:iroh_ssh_app/widgets/terminal_pane.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
@@ -47,7 +48,8 @@ class TerminalTab extends StatefulWidget {
 }
 
 class TerminalTabState extends State<TerminalTab>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin
+    implements SessionTabController {
   static final bool _isAndroid = Platform.isAndroid;
 
   static Future<void> _showToast(String message) async {
@@ -91,19 +93,28 @@ class TerminalTabState extends State<TerminalTab>
   StreamController<List<int>>? _ipcStdinController;
 
   bool get connected => _connected;
+
+  @override
   bool get shellReady => _shellReady;
 
+  @override
   void requestFocus() {
     _paneKey.currentState?.requestFocus();
   }
 
+  @override
   void disableFocus() {
     _paneKey.currentState?.disableFocus();
   }
 
+  @override
   void enableFocus() {
     _paneKey.currentState?.enableFocus();
   }
+
+  // The terminal doesn't consume the system back button.
+  @override
+  bool handleBack() => false;
 
   Future<ui.Image?> captureImage({double pixelRatio = 1.0}) {
     return _paneKey.currentState?.captureImage(pixelRatio: pixelRatio) ??

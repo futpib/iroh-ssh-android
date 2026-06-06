@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
+import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/connection_storage.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
@@ -33,6 +34,7 @@ class ConnectScreen extends StatefulWidget {
 class _ConnectScreenState extends State<ConnectScreen> {
   final _targetController = TextEditingController();
   ConnectionType _connectionType = ConnectionType.iroh;
+  TabKind _tabKind = TabKind.terminal;
   bool _overrideRelays = false;
   bool _useDefaultRelays = true;
   List<String> _customRelayUrls = [];
@@ -143,6 +145,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   Future<void> _connectTo(String target,
       {ConnectionType connectionType = ConnectionType.iroh,
+      TabKind kind = TabKind.terminal,
       bool overrideRelays = false,
       bool useDefaultRelays = true,
       List<String> customRelayUrls = const [],
@@ -240,6 +243,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   username: event.username,
                   displayName: event.displayName,
                   connectionType: connectionType,
+                  kind: kind,
                 ));
               }
             } else if (event is ErrorEvent) {
@@ -254,6 +258,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
         FlutterForegroundTask.addTaskDataCallback(onData);
         FlutterForegroundTask.sendDataToTask(ConnectCommand(
           connectionType: connectionType,
+          kind: kind,
           endpointId: endpointId,
           username: username,
           displayName: displayName,
@@ -333,6 +338,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
           keyNames: keys.map((k) => k.name).toList(),
           displayName: displayName,
           connectionType: connectionType,
+          kind: kind,
         );
 
         if (widget.returnResult) {
@@ -373,7 +379,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Future<void> _connect() async {
     if (_connectionType == ConnectionType.local) {
       await _connectTo('',
-          connectionType: ConnectionType.local);
+          connectionType: ConnectionType.local, kind: _tabKind);
       return;
     }
 
@@ -387,6 +393,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
     await _connectTo(raw,
         connectionType: _connectionType,
+        kind: _tabKind,
         overrideRelays: _overrideRelays,
         useDefaultRelays: _useDefaultRelays,
         customRelayUrls: _customRelayUrls,
@@ -429,6 +436,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     });
     _connectTo(conn.target,
         connectionType: conn.connectionType,
+        kind: _tabKind,
         overrideRelays: conn.overrideRelays,
         useDefaultRelays: conn.useDefaultRelays,
         customRelayUrls: conn.customRelayUrls,
@@ -492,6 +500,22 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       _connectionType = selected.first;
                       _error = null;
                     });
+                  },
+                ),
+                const SizedBox(height: 12),
+                SegmentedButton<TabKind>(
+                  segments: TabKind.values.map((kind) {
+                    return ButtonSegment<TabKind>(
+                      value: kind,
+                      label: Text(kind.label),
+                      icon: Icon(kind == TabKind.terminal
+                          ? Icons.terminal
+                          : Icons.folder_outlined),
+                    );
+                  }).toList(),
+                  selected: {_tabKind},
+                  onSelectionChanged: (selected) {
+                    setState(() => _tabKind = selected.first);
                   },
                 ),
                 const SizedBox(height: 16),
@@ -572,9 +596,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(_connectionType == ConnectionType.local
-                          ? 'Open Shell'
-                          : 'Connect'),
+                      : Text(_tabKind == TabKind.files
+                          ? 'Open Files'
+                          : _connectionType == ConnectionType.local
+                              ? 'Open Shell'
+                              : 'Connect'),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 16),
