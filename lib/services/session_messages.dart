@@ -391,13 +391,21 @@ class SftpDownloadCommand extends ServiceCommand {
   final String sessionId;
   final String requestId;
   final String remotePath;
+
+  /// Where the service writes the bytes. On Android this is a temp/cache path;
+  /// when [publishName] is set the service then publishes it to public Downloads.
   final String localPath;
+
+  /// If set, after the transfer the service publishes [localPath] into the
+  /// device's public Downloads under this name (and removes the temp file).
+  final String? publishName;
 
   SftpDownloadCommand({
     required this.sessionId,
     required this.requestId,
     required this.remotePath,
     required this.localPath,
+    this.publishName,
   });
 
   @override
@@ -407,6 +415,7 @@ class SftpDownloadCommand extends ServiceCommand {
         'requestId': requestId,
         'remotePath': remotePath,
         'localPath': localPath,
+        if (publishName != null) 'publishName': publishName,
       };
 
   factory SftpDownloadCommand.fromJson(Map<String, dynamic> json) =>
@@ -415,6 +424,7 @@ class SftpDownloadCommand extends ServiceCommand {
         requestId: json['requestId'] as String,
         remotePath: json['remotePath'] as String,
         localPath: json['localPath'] as String,
+        publishName: json['publishName'] as String?,
       );
 }
 

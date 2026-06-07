@@ -143,10 +143,21 @@ void main() {
 
     test('download / upload carry both paths', () {
       final dl = SftpDownloadCommand(
-          sessionId: 's', requestId: 'r', remotePath: '/r', localPath: '/l');
+          sessionId: 's',
+          requestId: 'r',
+          remotePath: '/r',
+          localPath: '/l',
+          publishName: 'r.bin');
       final dld = ServiceCommand.decode(dl.encode()) as SftpDownloadCommand;
       expect(dld.remotePath, '/r');
       expect(dld.localPath, '/l');
+      expect(dld.publishName, 'r.bin');
+
+      // publishName is optional (desktop downloads don't publish).
+      final dl2 = SftpDownloadCommand(
+          sessionId: 's', requestId: 'r', remotePath: '/r', localPath: '/l');
+      final dld2 = ServiceCommand.decode(dl2.encode()) as SftpDownloadCommand;
+      expect(dld2.publishName, isNull);
 
       final up = SftpUploadCommand(
           sessionId: 's', requestId: 'r', localPath: '/l', remotePath: '/r');

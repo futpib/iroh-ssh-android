@@ -133,6 +133,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
       await FlutterForegroundTask.requestNotificationPermission();
       await FlutterForegroundTask.startService(
+        // dataSync covers the file transfers; specialUse keeps SSH sessions alive.
+        serviceTypes: const [
+          ForegroundServiceTypes.dataSync,
+          ForegroundServiceTypes.specialUse,
+        ],
         notificationTitle: 'Iroh SSH',
         notificationText: 'Connecting...',
         notificationButtons: [

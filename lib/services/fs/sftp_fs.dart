@@ -82,30 +82,53 @@ class SftpFs implements RemoteFs {
   }
 
   @override
-  Stream<int> download(String remotePath, String localPath) async* {
-    final file = await _sftp.open(remotePath); // read mode is the default
-    try {
-      final sink = File(localPath).openWrite();
+  Stream<int> download(String remotePath, String localPath) {
+    // Use an explicit cancel flag rather than relying on async* generator
+    // cancellation, which didn't reliably stop the windowed SFTP read — the
+    // loop checks [cancelled] and breaks promptly when the subscription is
+    // cancelled (mirrors [upload]).
+    late StreamController<int> controller;
+    SftpFile? file;
+    IOSink? sink;
+    var cancelled = false;
+
+    Future<void> run() async {
       try {
+        file = await _sftp.open(remotePath); // read mode is the default
+        if (cancelled) return;
+        sink = File(localPath).openWrite();
         var transferred = 0;
         var lastEmitted = 0;
-        // read() streams with windowed flow-control — never loads the whole
-        // file. Cancelling our subscription breaks this loop and runs finally.
-        await for (final chunk in file.read()) {
-          sink.add(chunk);
+        await for (final chunk in file!.read()) {
+          if (cancelled) break;
+          sink!.add(chunk);
           transferred += chunk.length;
           if (transferred - lastEmitted >= _progressChunk) {
             lastEmitted = transferred;
-            yield transferred;
+            if (!controller.isClosed) controller.add(transferred);
           }
         }
-        if (transferred != lastEmitted) yield transferred;
+        if (!cancelled && transferred != lastEmitted && !controller.isClosed) {
+          controller.add(transferred);
+        }
+      } catch (e, st) {
+        if (!controller.isClosed) controller.addError(e, st);
       } finally {
-        await sink.close();
+        try {
+          await sink?.close();
+        } catch (_) {}
+        try {
+          await file?.close();
+        } catch (_) {}
+        if (!controller.isClosed) await controller.close();
       }
-    } finally {
-      await file.close();
     }
+
+    controller = StreamController<int>(
+      onListen: run,
+      onCancel: () => cancelled = true,
+    );
+    return controller.stream;
   }
 
   @override

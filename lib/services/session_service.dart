@@ -1,10 +1,12 @@
 import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/services/background_session.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
+import 'package:iroh_ssh_app/services/transfer_notifications.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/src/rust/frb_generated.dart';
 
@@ -17,9 +19,27 @@ class SshSessionService extends TaskHandler {
   final Map<String, BackgroundSession> _sessions = {};
   int _sessionCounter = 0;
 
+  /// Per-transfer progress notifications, driven from this (service) isolate.
+  /// A Cancel tap routes here and is dispatched to the owning session. Created
+  /// in [onStart] — NOT as a field — because its constructor installs a
+  /// MethodChannel handler, which requires the isolate's binding to exist first.
+  TransferNotifications? _notifications;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    // The service isolate needs a binding before any MethodChannel is touched.
+    WidgetsFlutterBinding.ensureInitialized();
     await RustLib.init();
+    _notifications = TransferNotifications()..onCancel = _onTransferCancelled;
+  }
+
+  void _onTransferCancelled(String requestId) {
+    for (final session in _sessions.values) {
+      if (session.hasTransfer(requestId)) {
+        session.cancelTransfer(requestId);
+        return;
+      }
+    }
   }
 
   @override
@@ -158,6 +178,7 @@ class SshSessionService extends TaskHandler {
   void _startSession(String sessionId, BackgroundSession session, ConnectCommand command) {
     session.onSendToUi = _sendToUi;
     session.onSessionEnded = () => _removeSession(sessionId);
+    session.notifications = _notifications;
     session.uiAttached = true;
     _sessions[sessionId] = session;
 
@@ -286,6 +307,8 @@ class SshSessionService extends TaskHandler {
     }
   }
 
+  /// The session-keeping foreground notification (separate from the per-transfer
+  /// progress notifications, which the background isolate owns natively).
   void _updateNotification() {
     final count = _sessions.length;
     if (count > 0) {

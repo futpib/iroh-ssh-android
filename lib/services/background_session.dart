@@ -1,20 +1,58 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/services/fs/local_fs.dart';
 import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
+import 'package:iroh_ssh_app/services/media_store.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/terminal_replay_buffer.dart';
+import 'package:iroh_ssh_app/services/transfer_notification.dart';
+import 'package:iroh_ssh_app/services/transfer_notifications.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
+import 'package:path/path.dart' as p;
 
 enum SessionState { connecting, connected, disconnected }
+
+/// Bookkeeping for one in-flight SFTP/local transfer: enough to drive its
+/// progress notification (direction, name, size, progress), publish a finished
+/// download, and abort it. Held in [BackgroundSession._activeTransfers], keyed
+/// by requestId. All of this lives in the foreground-service isolate.
+class TransferInfo {
+  final String label;
+  final bool isUpload;
+
+  /// Local file the bytes are written to (download) or read from (upload). For
+  /// a download this is a temp/cache path that is cleaned up afterwards.
+  final String localPath;
+
+  /// For a download: if set, publish [localPath] to public Downloads under this
+  /// name when finished. Null for uploads.
+  final String? publishName;
+
+  int? total; // filled in asynchronously once the size is known
+  int transferred = 0;
+  late final StreamSubscription<int> sub;
+
+  /// Last time the notification was refreshed, to throttle updates (a fast
+  /// transfer emits every 256 KB — far too often to re-post the notification).
+  DateTime lastNotifAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  TransferInfo({
+    required this.label,
+    required this.isUpload,
+    required this.localPath,
+    this.publishName,
+    this.total,
+  });
+}
 
 class BackgroundSession {
   final String sessionId;
@@ -44,7 +82,15 @@ class BackgroundSession {
   RemoteFs? _fs;
 
   /// In-flight SFTP transfers keyed by requestId, so a cancel can abort them.
-  final Map<String, StreamSubscription<int>> _activeTransfers = {};
+  final Map<String, TransferInfo> _activeTransfers = {};
+
+  /// True if this session owns the transfer with [requestId] (for routing a
+  /// notification Cancel tap to the right session).
+  bool hasTransfer(String requestId) => _activeTransfers.containsKey(requestId);
+
+  /// Native per-transfer progress notifications (set by the service). All
+  /// transfer UI lives here — nothing crosses to the UI isolate.
+  TransferNotifications? notifications;
 
   SessionState state = SessionState.connecting;
   final TerminalReplayBuffer replayBuffer = TerminalReplayBuffer();
@@ -213,6 +259,15 @@ class BackgroundSession {
     _sendShellReady();
   }
 
+  /// Test-only: attach a fake [RemoteFs] and mark the session connected, so the
+  /// SFTP/transfer orchestration ([handleSftp], notifications, publish, cancel)
+  /// can be exercised without a real connection.
+  @visibleForTesting
+  void debugAttachFs(RemoteFs fs) {
+    _fs = fs;
+    state = SessionState.connected;
+  }
+
   // =========================================================================
   // SFTP / file-manager command handling
   // =========================================================================
@@ -248,11 +303,28 @@ class BackgroundSession {
         await _sftpOk(command.requestId,
             () => _fs!.remove(command.path, recursive: command.recursive));
       case SftpDownloadCommand():
-        _sftpTransfer(command.requestId,
-            () => _fs!.download(command.remotePath, command.localPath));
+        // Register the transfer synchronously so a fast cancel can find it,
+        // then resolve the size for the notification's progress % in parallel.
+        _sftpTransfer(
+          command.requestId,
+          label: p.posix.basename(command.remotePath),
+          isUpload: false,
+          localPath: command.localPath,
+          publishName: command.publishName,
+          open: () => _fs!.download(command.remotePath, command.localPath),
+        );
+        _resolveTotal(
+            command.requestId, () => _statSizeQuietly(command.remotePath));
       case SftpUploadCommand():
-        _sftpTransfer(command.requestId,
-            () => _fs!.upload(command.localPath, command.remotePath));
+        _sftpTransfer(
+          command.requestId,
+          label: p.posix.basename(command.localPath),
+          isUpload: true,
+          localPath: command.localPath,
+          open: () => _fs!.upload(command.localPath, command.remotePath),
+        );
+        _resolveTotal(
+            command.requestId, () => _fileLengthQuietly(command.localPath));
       case SftpInitialDirCommand():
         await _sftpGuarded(command.requestId, () async {
           final dir = await _fs!.initialDir();
@@ -263,9 +335,58 @@ class BackgroundSession {
           ));
         });
       case SftpCancelCommand():
-        await _activeTransfers.remove(command.requestId)?.cancel();
+        await cancelTransfer(command.requestId);
       default:
         break;
+    }
+  }
+
+  /// Abort an in-flight transfer (from the notification's Cancel action) and
+  /// remove its notification. For a download the partial temp file is deleted.
+  Future<void> cancelTransfer(String requestId) async {
+    final info = _activeTransfers.remove(requestId);
+    if (info == null) return;
+    await info.sub.cancel();
+    if (!info.isUpload) await _deleteQuietly(info.localPath);
+    await notifications?.cancel(requestId);
+  }
+
+  /// Abort every in-flight transfer (on disconnect/reconnect): cancel the
+  /// subscription, drop any partial download temp file, and clear its notification.
+  Future<void> _abortAllTransfers() async {
+    for (final entry in _activeTransfers.entries) {
+      await entry.value.sub.cancel();
+      if (!entry.value.isUpload) await _deleteQuietly(entry.value.localPath);
+      await notifications?.cancel(entry.key);
+    }
+    _activeTransfers.clear();
+  }
+
+  /// Resolve a transfer's total size (for the notification %) without blocking
+  /// its start. No-op if the transfer was already cancelled/finished.
+  Future<void> _resolveTotal(
+      String requestId, Future<int?> Function() get) async {
+    final total = await get();
+    final info = _activeTransfers[requestId];
+    if (info != null && total != null) {
+      info.total = total;
+      _showProgress(requestId, info);
+    }
+  }
+
+  Future<int?> _statSizeQuietly(String path) async {
+    try {
+      return (await _fs?.stat(path))?.size;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<int?> _fileLengthQuietly(String path) async {
+    try {
+      return await File(path).length();
+    } catch (_) {
+      return null;
     }
   }
 
@@ -301,7 +422,14 @@ class BackgroundSession {
     });
   }
 
-  void _sftpTransfer(String requestId, Stream<int> Function() open) {
+  void _sftpTransfer(
+    String requestId, {
+    required String label,
+    required bool isUpload,
+    required String localPath,
+    String? publishName,
+    required Stream<int> Function() open,
+  }) {
     if (_fs == null) {
       _sendSftp(SftpErrorEvent(
         sessionId: sessionId,
@@ -310,29 +438,108 @@ class BackgroundSession {
       ));
       return;
     }
-    final sub = open().listen(
+    final info = TransferInfo(
+      label: label,
+      isUpload: isUpload,
+      localPath: localPath,
+      publishName: publishName,
+    );
+    info.sub = open().listen(
       (transferred) {
-        _sendSftp(SftpProgressEvent(
-          sessionId: sessionId,
-          requestId: requestId,
-          transferred: transferred,
-        ));
+        // Ignore late events after a cancel removed the transfer, so its
+        // notification isn't re-created.
+        if (!_activeTransfers.containsKey(requestId)) return;
+        info.transferred = transferred;
+        // Throttle notification refreshes — posting on every 256 KB chunk
+        // floods the platform/main thread (NotificationManager.notify) and ANRs.
+        final now = DateTime.now();
+        if (now.difference(info.lastNotifAt) >=
+            const Duration(milliseconds: 400)) {
+          info.lastNotifAt = now;
+          _showProgress(requestId, info);
+        }
       },
       onError: (e) {
         _activeTransfers.remove(requestId);
-        _sendSftp(SftpErrorEvent(
-          sessionId: sessionId,
+        if (!isUpload) _deleteQuietly(localPath);
+        notifications?.show(
           requestId: requestId,
-          message: e.toString(),
-        ));
+          title: label,
+          text: 'Failed: $e',
+          isUpload: isUpload,
+          ongoing: false,
+          showCancel: false,
+        );
       },
       onDone: () {
         _activeTransfers.remove(requestId);
-        _sendSftp(SftpDoneEvent(sessionId: sessionId, requestId: requestId));
+        _finishTransfer(requestId, info);
       },
       cancelOnError: true,
     );
-    _activeTransfers[requestId] = sub;
+    _activeTransfers[requestId] = info;
+    _showProgress(requestId, info);
+  }
+
+  void _showProgress(String requestId, TransferInfo info) {
+    notifications?.show(
+      requestId: requestId,
+      title: info.label,
+      text: transferText(info.transferred, info.total),
+      isUpload: info.isUpload,
+      max: info.total ?? 0,
+      progress: info.transferred,
+      indeterminate: info.total == null,
+      ongoing: true,
+      showCancel: true,
+    );
+  }
+
+  /// Finalize a completed transfer: publish a download to public Downloads,
+  /// show the final notification, and tell the UI to refresh its listing.
+  Future<void> _finishTransfer(String requestId, TransferInfo info) async {
+    String resultText;
+    if (info.isUpload) {
+      resultText = 'Uploaded';
+    } else if (info.publishName != null) {
+      final saved = await _publishDownload(info);
+      resultText = saved != null ? 'Saved to $saved' : 'Saved';
+    } else {
+      resultText = 'Saved';
+    }
+    await notifications?.show(
+      requestId: requestId,
+      title: info.label,
+      text: resultText,
+      isUpload: info.isUpload,
+      ongoing: false,
+      showCancel: false,
+    );
+    // Let the tab refresh its listing (e.g. show a just-uploaded file).
+    _sendSftp(SftpDoneEvent(sessionId: sessionId, requestId: requestId));
+  }
+
+  /// Publish a finished download (temp [TransferInfo.localPath]) into the
+  /// device's public Downloads via MediaStore, then remove the temp file.
+  /// Returns the saved location, or null on failure.
+  Future<String?> _publishDownload(TransferInfo info) async {
+    try {
+      final saved = await MediaStore.saveToDownloads(
+        sourcePath: info.localPath,
+        displayName: info.publishName!,
+      );
+      await _deleteQuietly(info.localPath);
+      return saved ?? info.localPath;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _deleteQuietly(String path) async {
+    try {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
   }
 
   void _flushStdout() {
@@ -448,10 +655,7 @@ class BackgroundSession {
     _ptyOutputSubscription = null;
     _pty?.kill();
     _pty = null;
-    for (final sub in _activeTransfers.values) {
-      sub.cancel();
-    }
-    _activeTransfers.clear();
+    await _abortAllTransfers();
     await _fs?.close();
     _fs = null;
     _session?.close();
@@ -498,10 +702,7 @@ class BackgroundSession {
     _ptyOutputSubscription = null;
     _pty?.kill();
     _pty = null;
-    for (final sub in _activeTransfers.values) {
-      sub.cancel();
-    }
-    _activeTransfers.clear();
+    await _abortAllTransfers();
     await _fs?.close();
     _fs = null;
     _session?.close();

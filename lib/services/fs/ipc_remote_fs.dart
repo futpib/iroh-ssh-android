@@ -16,9 +16,15 @@ class RemoteFsException implements Exception {
   String toString() => message;
 }
 
-/// UI-side [RemoteFs] that proxies every call to the background service over
-/// the foreground-task message channel, correlating responses by requestId.
-/// Used on Android; on desktop the tab talks to a real [SftpFs]/[LocalFs].
+/// UI-side [RemoteFs] that proxies metadata operations (list/stat/mkdir/…) to
+/// the background service over the foreground-task channel, correlating
+/// responses by requestId. Used on Android; on desktop the tab talks to a real
+/// [SftpFs]/[LocalFs].
+///
+/// Transfers are NOT done through the [download]/[upload] stream API here:
+/// they're fired into the service with [startDownload]/[startUpload] and run
+/// entirely in the service isolate (progress + cancel via a native
+/// notification), so nothing transfer-related touches the UI isolate.
 ///
 /// Android device paths and SFTP paths are both POSIX, so path math is posix.
 class IpcRemoteFs implements RemoteFs {
@@ -27,7 +33,6 @@ class IpcRemoteFs implements RemoteFs {
 
   int _counter = 0;
   final Map<String, Completer<dynamic>> _pending = {};
-  final Map<String, StreamController<int>> _transfers = {};
   bool _closed = false;
 
   IpcRemoteFs({required this.sessionId, required this.send});
@@ -43,8 +48,9 @@ class IpcRemoteFs implements RemoteFs {
     return parent.isEmpty ? '/' : parent;
   }
 
-  /// Route a service event to the matching pending request/transfer. The tab
-  /// calls this for every [ServiceEvent] it receives.
+  /// Route a service event to the matching pending request. The tab calls this
+  /// for every [ServiceEvent] it receives. Transfer lifecycle (done/error) is
+  /// handled by the tab directly, not here.
   void handleEvent(ServiceEvent event) {
     switch (event) {
       case SftpListResultEvent() when event.sessionId == sessionId:
@@ -55,10 +61,6 @@ class IpcRemoteFs implements RemoteFs {
         _complete(event.requestId, event.path);
       case SftpOkEvent() when event.sessionId == sessionId:
         _complete(event.requestId, null);
-      case SftpProgressEvent() when event.sessionId == sessionId:
-        _transfers[event.requestId]?.add(event.transferred);
-      case SftpDoneEvent() when event.sessionId == sessionId:
-        _transfers.remove(event.requestId)?.close();
       case SftpErrorEvent() when event.sessionId == sessionId:
         _fail(event.requestId, RemoteFsException(event.message));
       default:
@@ -74,11 +76,6 @@ class IpcRemoteFs implements RemoteFs {
   void _fail(String requestId, Object error) {
     final c = _pending.remove(requestId);
     if (c != null && !c.isCompleted) c.completeError(error);
-    final t = _transfers.remove(requestId);
-    if (t != null && !t.isClosed) {
-      t.addError(error);
-      t.close();
-    }
   }
 
   Future<T> _request<T>(String requestId, ServiceCommand command) {
@@ -137,46 +134,41 @@ class IpcRemoteFs implements RemoteFs {
             recursive: recursive));
   }
 
-  @override
-  Stream<int> download(String remotePath, String localPath) {
+  /// Fire a download into the service (fire-and-forget). The service writes to
+  /// [localPath] and, if [publishName] is set, publishes it to public Downloads.
+  void startDownload(String remotePath, String localPath, {String? publishName}) {
+    if (_closed) return;
     final id = _nextId();
-    return _transfer(
-        id,
-        SftpDownloadCommand(
-            sessionId: sessionId,
-            requestId: id,
-            remotePath: remotePath,
-            localPath: localPath));
+    send(SftpDownloadCommand(
+      sessionId: sessionId,
+      requestId: id,
+      remotePath: remotePath,
+      localPath: localPath,
+      publishName: publishName,
+    ).encode());
   }
 
-  @override
-  Stream<int> upload(String localPath, String remotePath) {
+  /// Fire an upload into the service (fire-and-forget).
+  void startUpload(String localPath, String remotePath) {
+    if (_closed) return;
     final id = _nextId();
-    return _transfer(
-        id,
-        SftpUploadCommand(
-            sessionId: sessionId,
-            requestId: id,
-            localPath: localPath,
-            remotePath: remotePath));
+    send(SftpUploadCommand(
+      sessionId: sessionId,
+      requestId: id,
+      localPath: localPath,
+      remotePath: remotePath,
+    ).encode());
   }
 
-  Stream<int> _transfer(String requestId, ServiceCommand command) {
-    late StreamController<int> controller;
-    controller = StreamController<int>(
-      onListen: () => send(command.encode()),
-      onCancel: () {
-        // Tell the service to abort the in-flight transfer.
-        if (!_closed) {
-          send(SftpCancelCommand(sessionId: sessionId, requestId: requestId)
-              .encode());
-        }
-        _transfers.remove(requestId);
-      },
-    );
-    _transfers[requestId] = controller;
-    return controller.stream;
-  }
+  // Transfers go through [startDownload]/[startUpload]; the streaming API is
+  // only used by the in-process desktop backends.
+  @override
+  Stream<int> download(String remotePath, String localPath) =>
+      throw UnsupportedError('Use startDownload on Android (IPC) mode');
+
+  @override
+  Stream<int> upload(String localPath, String remotePath) =>
+      throw UnsupportedError('Use startUpload on Android (IPC) mode');
 
   @override
   Future<void> close() async {
@@ -185,9 +177,5 @@ class IpcRemoteFs implements RemoteFs {
       if (!c.isCompleted) c.completeError(RemoteFsException('Disconnected'));
     }
     _pending.clear();
-    for (final t in _transfers.values) {
-      if (!t.isClosed) await t.close();
-    }
-    _transfers.clear();
   }
 }

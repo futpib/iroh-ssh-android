@@ -1,5 +1,4 @@
-import 'dart:async';
-import 'dart:io' show Directory, File, Platform;
+import 'dart:io' show Platform;
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:file_picker/file_picker.dart';
@@ -14,8 +13,8 @@ import 'package:iroh_ssh_app/services/fs/local_fs.dart';
 import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
-import 'package:iroh_ssh_app/services/media_store.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
+import 'package:iroh_ssh_app/services/transfer_notification.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/widgets/session_tab_controller.dart';
 import 'package:path/path.dart' as p;
@@ -152,6 +151,10 @@ class FileManagerTabState extends State<FileManagerTab>
           if (mounted) widget.onDisconnected();
         case ErrorEvent() when event.sessionId == widget.session.sessionId:
           if (mounted) setState(() => _error = event.message);
+        case SftpDoneEvent() when event.sessionId == widget.session.sessionId:
+          // A background transfer finished; refresh so a just-uploaded file
+          // shows up. Progress/cancel live entirely in the notification.
+          if (_ready) _refresh();
         default:
           break;
       }
@@ -336,121 +339,52 @@ class FileManagerTabState extends State<FileManagerTab>
 
   Future<void> _download(FsEntry entry) async {
     if (_isAndroid) {
-      await _downloadAndroid(entry);
+      // Hand the whole job to the background service: it streams the bytes to a
+      // cache file, publishes to public Downloads, and shows a progress
+      // notification (with Cancel) — all off the UI isolate.
+      final tmp = p.join((await getTemporaryDirectory()).path, entry.name);
+      _ipc!.startDownload(entry.path, tmp, publishName: entry.name);
+      _toast('Downloading ${entry.name}…');
       return;
     }
-    // Desktop: let the user pick a (writable) destination directory.
+    // Desktop: no foreground service — run it in-process to a chosen directory.
     final dir = await FilePicker.platform.getDirectoryPath(
       initialDirectory: (await getDownloadsDirectory())?.path,
     );
     if (dir == null) return;
     final localPath = p.join(dir, entry.name);
+    _toast('Downloading ${entry.name}…');
     try {
-      final ok = await _runTransfer(
-        title: 'Downloading ${entry.name}',
-        total: entry.size,
-        stream: _fs!.download(entry.path, localPath),
-      );
-      if (ok) _toast('Saved to $localPath');
+      await _fs!.download(entry.path, localPath).drain<void>();
+      _toast('Saved to $localPath');
     } catch (e) {
       _showError(e);
     }
-  }
-
-  /// Android download: stage the SFTP transfer into the app cache (works in the
-  /// background-service isolate and survives backgrounding), then publish it to
-  /// the **public** Downloads via MediaStore so it's visible in the Files app.
-  /// Scoped storage forbids writing the public dir via dart:io directly, hence
-  /// stage-then-publish. Falls back to the app's external files dir on
-  /// Android < 10 (no MediaStore).
-  Future<void> _downloadAndroid(FsEntry entry) async {
-    final cache = await getTemporaryDirectory();
-    final tmpPath = p.join(cache.path, entry.name);
-    try {
-      final ok = await _runTransfer(
-        title: 'Downloading ${entry.name}',
-        total: entry.size,
-        stream: _fs!.download(entry.path, tmpPath),
-      );
-      if (!ok) {
-        await _deleteQuietly(tmpPath);
-        return;
-      }
-      final saved = await MediaStore.saveToDownloads(
-        sourcePath: tmpPath,
-        displayName: entry.name,
-      );
-      if (saved != null) {
-        await _deleteQuietly(tmpPath);
-        _toast('Saved to $saved');
-        return;
-      }
-      // Android < 10: no MediaStore — keep it in the app's external files dir.
-      final ext = await getExternalStorageDirectory();
-      if (ext != null) {
-        final dir = Directory(p.join(ext.path, 'Downloads'));
-        await dir.create(recursive: true);
-        final dest = p.join(dir.path, entry.name);
-        await File(tmpPath).copy(dest);
-        await _deleteQuietly(tmpPath);
-        _toast('Saved to $dest');
-      } else {
-        _toast('Saved to $tmpPath');
-      }
-    } catch (e) {
-      await _deleteQuietly(tmpPath);
-      _showError(e);
-    }
-  }
-
-  Future<void> _deleteQuietly(String path) async {
-    try {
-      final f = File(path);
-      if (await f.exists()) await f.delete();
-    } catch (_) {}
   }
 
   Future<void> _upload() async {
-    final result = await FilePicker.platform.pickFiles();
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
+    final picked = await FilePicker.platform.pickFiles();
+    if (picked == null || picked.files.isEmpty) return;
+    final file = picked.files.first;
     final localPath = file.path;
     if (localPath == null) {
       _toast('Could not access the selected file');
       return;
     }
     final remotePath = _fs!.join(_cwd, file.name);
+    if (_isAndroid) {
+      _ipc!.startUpload(localPath, remotePath);
+      _toast('Uploading ${file.name}…');
+      return;
+    }
+    // Desktop: run it in-process, then refresh the listing.
+    _toast('Uploading ${file.name}…');
     try {
-      final ok = await _runTransfer(
-        title: 'Uploading ${file.name}',
-        total: file.size,
-        stream: _fs!.upload(localPath, remotePath),
-      );
-      if (ok) await _navigateTo(_cwd);
+      await _fs!.upload(localPath, remotePath).drain<void>();
+      await _navigateTo(_cwd);
     } catch (e) {
       _showError(e);
     }
-  }
-
-  /// Drive a transfer behind a modal progress dialog. Returns true when it
-  /// completed, false when the user cancelled; throws on error. The dialog
-  /// ([_TransferDialog]) owns its subscription + progress state, so nothing is
-  /// disposed while the route animates out (which would crash).
-  Future<bool> _runTransfer({
-    required String title,
-    required int? total,
-    required Stream<int> stream,
-  }) async {
-    if (!mounted) return false;
-    final outcome = await showDialog<_TransferOutcome>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) =>
-          _TransferDialog(title: title, total: total, stream: stream),
-    );
-    if (outcome == null) return false;
-    if (outcome.error != null) throw outcome.error!;
-    return outcome.done;
   }
 
   // =========================================================================
@@ -547,7 +481,7 @@ class FileManagerTabState extends State<FileManagerTab>
     } else if (entry.isLink) {
       parts.add('Link');
     } else if (entry.size != null) {
-      parts.add(_fmtSize(entry.size!));
+      parts.add(fmtSize(entry.size!));
     }
     if (entry.mtime != null) {
       parts.add(_fmtDate(DateTime.fromMillisecondsSinceEpoch(
@@ -564,6 +498,9 @@ class FileManagerTabState extends State<FileManagerTab>
 
   @override
   void dispose() {
+    // Transfers are owned by the background service (they keep running and stay
+    // controllable from their notification), so closing the tab doesn't touch
+    // them — it just detaches.
     if (_isAndroid) {
       // Detach but keep the session alive (mirrors TerminalTab).
       if (_serviceDataCallback != null) {
@@ -778,107 +715,3 @@ class _PromptDialogState extends State<_PromptDialog> {
   }
 }
 
-/// Outcome popped by [_TransferDialog].
-class _TransferOutcome {
-  final bool done;
-  final Object? error;
-  const _TransferOutcome.done()
-      : done = true,
-        error = null;
-  const _TransferOutcome.cancelled()
-      : done = false,
-        error = null;
-  const _TransferOutcome.failed(this.error) : done = false;
-}
-
-/// Modal progress dialog that owns the transfer [StreamSubscription] and the
-/// progress value, so nothing is disposed while the route animates out. Pops a
-/// [_TransferOutcome] (done / cancelled / failed) when the transfer settles.
-class _TransferDialog extends StatefulWidget {
-  final String title;
-  final int? total;
-  final Stream<int> stream;
-
-  const _TransferDialog({
-    required this.title,
-    required this.total,
-    required this.stream,
-  });
-
-  @override
-  State<_TransferDialog> createState() => _TransferDialogState();
-}
-
-class _TransferDialogState extends State<_TransferDialog> {
-  StreamSubscription<int>? _sub;
-  int _transferred = 0;
-  bool _settled = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _sub = widget.stream.listen(
-      (n) {
-        if (mounted) setState(() => _transferred = n);
-      },
-      onError: (Object e) => _finish(_TransferOutcome.failed(e)),
-      onDone: () => _finish(const _TransferOutcome.done()),
-      cancelOnError: true,
-    );
-  }
-
-  void _finish(_TransferOutcome outcome) {
-    if (_settled || !mounted) return;
-    _settled = true;
-    Navigator.of(context).pop(outcome);
-  }
-
-  Future<void> _cancel() async {
-    await _sub?.cancel();
-    _finish(const _TransferOutcome.cancelled());
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final tot = widget.total;
-    final frac =
-        (tot != null && tot > 0) ? (_transferred / tot).clamp(0.0, 1.0) : null;
-    return PopScope(
-      canPop: false,
-      child: AlertDialog(
-        title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            LinearProgressIndicator(value: frac),
-            const SizedBox(height: 12),
-            Text(tot != null
-                ? '${_fmtSize(_transferred)} / ${_fmtSize(tot)}'
-                : _fmtSize(_transferred)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: _cancel, child: const Text('Cancel')),
-        ],
-      ),
-    );
-  }
-}
-
-String _fmtSize(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  double v = bytes / 1024;
-  int i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return '${v.toStringAsFixed(v >= 10 ? 0 : 1)} ${units[i]}';
-}
