@@ -12,6 +12,7 @@ import 'package:iroh_ssh_app/services/fs/ipc_remote_fs.dart';
 import 'package:iroh_ssh_app/services/fs/local_fs.dart';
 import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
+import 'package:iroh_ssh_app/services/fs/upload_naming.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/transfer_notification.dart';
@@ -344,7 +345,7 @@ class FileManagerTabState extends State<FileManagerTab>
       // notification (with Cancel) — all off the UI isolate.
       final tmp = p.join((await getTemporaryDirectory()).path, entry.name);
       _ipc!.startDownload(entry.path, tmp, publishName: entry.name);
-      _toast('Downloading ${entry.name}…');
+      _toast('Downloading ${entry.name} — see the notification for progress');
       return;
     }
     // Desktop: no foreground service — run it in-process to a chosen directory.
@@ -371,13 +372,21 @@ class FileManagerTabState extends State<FileManagerTab>
       _toast('Could not access the selected file');
       return;
     }
-    final remotePath = _fs!.join(_cwd, file.name);
     if (_isAndroid) {
-      _ipc!.startUpload(localPath, remotePath);
-      _toast('Uploading ${file.name}…');
+      // The service resolves a non-clobbering name and shows progress in a
+      // notification — just hand it the intended target.
+      _ipc!.startUpload(localPath, _fs!.join(_cwd, file.name));
+      _toast('Uploading ${file.name} — see the notification for progress');
       return;
     }
-    // Desktop: run it in-process, then refresh the listing.
+    // Desktop: pick a non-clobbering name, run it in-process, then refresh.
+    final remotePath = await resolveUploadTarget(
+      dir: _cwd,
+      name: file.name,
+      join: _fs!.join,
+      listNames: (dir) async =>
+          (await _fs!.list(dir)).map((e) => e.name).toList(),
+    );
     _toast('Uploading ${file.name}…');
     try {
       await _fs!.upload(localPath, remotePath).drain<void>();

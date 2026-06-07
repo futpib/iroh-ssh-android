@@ -17,6 +17,12 @@ class _FakeFs implements RemoteFs {
   final uploadController = StreamController<int>();
   bool downloadCancelled = false;
 
+  /// Entries the directory listing reports (drives upload collision-renaming).
+  List<FsEntry> existing = [];
+
+  /// The remote path the last [upload] was opened with.
+  String? lastUploadRemotePath;
+
   _FakeFs() {
     downloadController.onCancel = () => downloadCancelled = true;
   }
@@ -25,15 +31,17 @@ class _FakeFs implements RemoteFs {
   Stream<int> download(String remotePath, String localPath) =>
       downloadController.stream;
   @override
-  Stream<int> upload(String localPath, String remotePath) =>
-      uploadController.stream;
+  Stream<int> upload(String localPath, String remotePath) {
+    lastUploadRemotePath = remotePath;
+    return uploadController.stream;
+  }
 
   @override
   Future<FsEntry> stat(String path, {bool followLink = true}) async =>
       FsEntry(name: 'x', path: path, isDir: false, isLink: false, size: 1000);
 
   @override
-  Future<List<FsEntry>> list(String path) async => const [];
+  Future<List<FsEntry>> list(String path) async => existing;
   @override
   Future<String> initialDir() async => '/';
   @override
@@ -78,7 +86,10 @@ void main() {
     });
     messenger.setMockMethodCallHandler(mediaChannel, (call) async {
       mediaCalls.add(call);
-      return 'Downloads/${(call.arguments as Map)['displayName']}';
+      return {
+        'uri': 'content://media/external/downloads/1',
+        'displayPath': 'Downloads/${(call.arguments as Map)['displayName']}',
+      };
     });
 
     fs = _FakeFs();
@@ -130,6 +141,9 @@ void main() {
     expect((shows().last.arguments as Map)['text'],
         contains('Saved to Downloads/photo.jpg'));
     expect((shows().last.arguments as Map)['ongoing'], isFalse);
+    // Tapping the finished notification opens the published file.
+    expect((shows().last.arguments as Map)['openUri'],
+        'content://media/external/downloads/1');
 
     // The UI is told to refresh.
     expect(events.whereType<SftpDoneEvent>(), hasLength(1));
@@ -178,6 +192,36 @@ void main() {
 
     expect(mediaCalls, isEmpty); // uploads don't touch Downloads
     expect((shows().last.arguments as Map)['text'], 'Uploaded');
+    expect(events.whereType<SftpDoneEvent>(), hasLength(1));
+  });
+
+  test('upload to an existing remote name is renamed, not overwritten',
+      () async {
+    // A file named note.txt already lives in the target directory.
+    fs.existing = [
+      FsEntry(
+          name: 'note.txt',
+          path: '/remote/note.txt',
+          isDir: false,
+          isLink: false),
+    ];
+
+    await session.handleSftp(SftpUploadCommand(
+      sessionId: 's',
+      requestId: 'r4',
+      localPath: '/cache/note.txt',
+      remotePath: '/remote/note.txt',
+    ));
+    await _settle();
+    fs.uploadController.add(10);
+    await _settle();
+    await fs.uploadController.close();
+    await _settle();
+
+    // The upload was opened against a disambiguated path, not the original.
+    expect(fs.lastUploadRemotePath, '/remote/note (1).txt');
+    // And the notification is titled with the final name.
+    expect((shows().first.arguments as Map)['title'], 'note (1).txt');
     expect(events.whereType<SftpDoneEvent>(), hasLength(1));
   });
 }

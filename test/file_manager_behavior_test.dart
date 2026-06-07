@@ -198,7 +198,10 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
-      return 'Downloads/${(call.arguments as Map)['displayName']}';
+      return {
+        'uri': 'content://media/external/downloads/42',
+        'displayPath': 'Downloads/${(call.arguments as Map)['displayName']}',
+      };
     });
 
     final result = await MediaStore.saveToDownloads(
@@ -207,7 +210,9 @@ void main() {
       mimeType: 'application/vnd.android.package-archive',
     );
 
-    expect(result, 'Downloads/app-debug.apk');
+    expect(result, isNotNull);
+    expect(result!.displayPath, 'Downloads/app-debug.apk');
+    expect(result.uri, 'content://media/external/downloads/42');
     expect(calls, hasLength(1));
     expect(calls.single.method, 'saveToDownloads');
     final args = calls.single.arguments as Map;

@@ -11,6 +11,7 @@ import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/services/fs/local_fs.dart';
 import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
+import 'package:iroh_ssh_app/services/fs/upload_naming.dart';
 import 'package:iroh_ssh_app/services/media_store.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/terminal_replay_buffer.dart';
@@ -316,15 +317,7 @@ class BackgroundSession {
         _resolveTotal(
             command.requestId, () => _statSizeQuietly(command.remotePath));
       case SftpUploadCommand():
-        _sftpTransfer(
-          command.requestId,
-          label: p.posix.basename(command.localPath),
-          isUpload: true,
-          localPath: command.localPath,
-          open: () => _fs!.upload(command.localPath, command.remotePath),
-        );
-        _resolveTotal(
-            command.requestId, () => _fileLengthQuietly(command.localPath));
+        await _sftpUpload(command);
       case SftpInitialDirCommand():
         await _sftpGuarded(command.requestId, () async {
           final dir = await _fs!.initialDir();
@@ -339,6 +332,41 @@ class BackgroundSession {
       default:
         break;
     }
+  }
+
+  /// Start an upload, first choosing a non-clobbering remote name: uploading a
+  /// file whose name already exists in the target directory creates
+  /// `name (1).ext`, `name (2).ext`, … rather than overwriting it. The
+  /// notification label reflects the final name.
+  ///
+  /// Resolving the name needs an SFTP `listdir` round trip, so this awaits
+  /// before registering the transfer — safe because a Cancel can only come from
+  /// the transfer's notification, which doesn't exist until [_sftpTransfer] runs.
+  Future<void> _sftpUpload(SftpUploadCommand command) async {
+    final fs = _fs;
+    if (fs == null) {
+      _sendSftp(SftpErrorEvent(
+        sessionId: sessionId,
+        requestId: command.requestId,
+        message: 'File manager not ready',
+      ));
+      return;
+    }
+    final remotePath = await resolveUploadTarget(
+      dir: p.posix.dirname(command.remotePath),
+      name: p.posix.basename(command.remotePath),
+      join: fs.join,
+      listNames: (dir) async => (await fs.list(dir)).map((e) => e.name).toList(),
+    );
+    _sftpTransfer(
+      command.requestId,
+      label: p.posix.basename(remotePath),
+      isUpload: true,
+      localPath: command.localPath,
+      open: () => fs.upload(command.localPath, remotePath),
+    );
+    _resolveTotal(
+        command.requestId, () => _fileLengthQuietly(command.localPath));
   }
 
   /// Abort an in-flight transfer (from the notification's Cancel action) and
@@ -499,11 +527,17 @@ class BackgroundSession {
   /// show the final notification, and tell the UI to refresh its listing.
   Future<void> _finishTransfer(String requestId, TransferInfo info) async {
     String resultText;
+    String? openUri;
     if (info.isUpload) {
       resultText = 'Uploaded';
     } else if (info.publishName != null) {
       final saved = await _publishDownload(info);
-      resultText = saved != null ? 'Saved to $saved' : 'Saved';
+      if (saved != null) {
+        resultText = 'Saved to ${saved.displayPath}';
+        openUri = saved.uri; // tapping the finished notification opens the file
+      } else {
+        resultText = 'Saved';
+      }
     } else {
       resultText = 'Saved';
     }
@@ -514,6 +548,7 @@ class BackgroundSession {
       isUpload: info.isUpload,
       ongoing: false,
       showCancel: false,
+      openUri: openUri,
     );
     // Let the tab refresh its listing (e.g. show a just-uploaded file).
     _sendSftp(SftpDoneEvent(sessionId: sessionId, requestId: requestId));
@@ -521,15 +556,15 @@ class BackgroundSession {
 
   /// Publish a finished download (temp [TransferInfo.localPath]) into the
   /// device's public Downloads via MediaStore, then remove the temp file.
-  /// Returns the saved location, or null on failure.
-  Future<String?> _publishDownload(TransferInfo info) async {
+  /// Returns the [SavedDownload] (content URI + display path), or null on failure.
+  Future<SavedDownload?> _publishDownload(TransferInfo info) async {
     try {
       final saved = await MediaStore.saveToDownloads(
         sourcePath: info.localPath,
         displayName: info.publishName!,
       );
       await _deleteQuietly(info.localPath);
-      return saved ?? info.localPath;
+      return saved;
     } catch (_) {
       return null;
     }

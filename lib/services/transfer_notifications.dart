@@ -25,6 +25,9 @@ class TransferNotifications {
   /// Show or update a transfer notification. [max]/[progress] drive the bar;
   /// pass [indeterminate] when the total size is unknown. [ongoing] true makes
   /// it non-swipeable (while transferring); set false for a final state.
+  ///
+  /// [openUri] (a `content://` URI) makes the notification open that file when
+  /// tapped — used on the final "Saved" state of a completed download.
   Future<void> show({
     required String requestId,
     required String title,
@@ -35,6 +38,7 @@ class TransferNotifications {
     bool indeterminate = false,
     bool ongoing = true,
     bool showCancel = true,
+    String? openUri,
   }) async {
     try {
       await _channel.invokeMethod('show', {
@@ -47,6 +51,7 @@ class TransferNotifications {
         'indeterminate': indeterminate,
         'ongoing': ongoing,
         'showCancel': showCancel,
+        'openUri': ?openUri,
       });
     } catch (_) {
       // Notifications are best-effort; never let them break a transfer.

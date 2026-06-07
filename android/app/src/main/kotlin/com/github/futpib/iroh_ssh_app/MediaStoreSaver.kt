@@ -61,22 +61,31 @@ object MediaStoreSaver {
 
     /**
      * Copies [src] into the device's public Downloads collection via MediaStore
-     * (Android 10+), streaming so large files don't load into memory. Returns a
-     * human-readable "Downloads/<name>" path, or null on Android < 10 (the
-     * caller then falls back to the app's external files dir).
+     * (Android 10+), streaming so large files don't load into memory. The MIME
+     * type is resolved from the file extension (falling back to [mimeType]) so
+     * the file opens with the right app. Returns a map of `uri` (the content://
+     * URI, for "open") and `displayPath` ("Downloads/<name>"), or null on
+     * Android < 10 (the caller then falls back to the app's external files dir).
      */
     private fun saveToDownloads(
         context: Context,
         src: File,
         displayName: String,
         mimeType: String,
-    ): String? {
+    ): HashMap<String, String>? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
 
         val resolver = context.contentResolver
+        val ext = displayName.substringAfterLast('.', "")
+        val resolvedMime = (if (ext.isNotEmpty()) {
+            android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(ext.lowercase())
+        } else {
+            null
+        }) ?: mimeType
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, displayName)
-            put(MediaStore.Downloads.MIME_TYPE, mimeType)
+            put(MediaStore.Downloads.MIME_TYPE, resolvedMime)
             put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
@@ -90,7 +99,10 @@ object MediaStoreSaver {
             values.clear()
             values.put(MediaStore.Downloads.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
-            return "Downloads/$displayName"
+            return hashMapOf(
+                "uri" to uri.toString(),
+                "displayPath" to "Downloads/$displayName",
+            )
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e

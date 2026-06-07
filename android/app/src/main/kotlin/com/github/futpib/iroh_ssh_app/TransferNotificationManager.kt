@@ -47,6 +47,7 @@ object TransferNotificationManager {
                             ongoing = call.argument<Boolean>("ongoing") ?: true,
                             showCancel = call.argument<Boolean>("showCancel") ?: true,
                             isUpload = call.argument<Boolean>("isUpload") ?: false,
+                            openUri = call.argument<String>("openUri"),
                         )
                         result.success(null)
                     }
@@ -98,6 +99,7 @@ object TransferNotificationManager {
         ongoing: Boolean,
         showCancel: Boolean,
         isUpload: Boolean,
+        openUri: String?,
     ) {
         val ctx = appContext ?: return
         val id = notifId(requestId)
@@ -115,6 +117,25 @@ object TransferNotificationManager {
 
         if (max > 0 || indeterminate) {
             builder.setProgress(max, progress, indeterminate)
+        }
+
+        // Tapping a finished download opens it (ACTION_VIEW on the content URI).
+        if (openUri != null) {
+            val uri = android.net.Uri.parse(openUri)
+            val type = ctx.contentResolver.getType(uri) ?: "*/*"
+            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, type)
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_ACTIVITY_NEW_TASK,
+                )
+            }
+            var viewFlags = PendingIntent.FLAG_UPDATE_CURRENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                viewFlags = viewFlags or PendingIntent.FLAG_IMMUTABLE
+            }
+            builder.setContentIntent(PendingIntent.getActivity(ctx, id, viewIntent, viewFlags))
+            builder.setAutoCancel(true)
         }
 
         if (showCancel) {
