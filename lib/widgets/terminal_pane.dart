@@ -248,12 +248,24 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   }
 
   void _onInput(TextEditingValue baseState, TextEditingValue currentState) {
+    // Captured before processInput, which clears transient modifiers.
+    final usedModifier = _input.ctrlActive || _input.altActive;
     final result = _input.processInput(baseState.text, currentState.text);
     for (int i = 0; i < result.deletions; i++) {
       widget.terminal.keyInput(TerminalKey.backspace);
     }
     if (result.modified.isNotEmpty) {
-      widget.terminal.textInput(result.modified);
+      // Some soft keyboards (e.g. FUTO) deliver Enter as a committed newline
+      // ("\n") through the text-input path instead of a hardware key event or
+      // editor action. Terminals expect carriage return ("\r") for Enter, so
+      // translate LF to CR before sending. Without this, raw-mode apps (tmux,
+      // vim, readline, full-screen TUIs) never receive Enter. Skip this when a
+      // modifier is held so Ctrl-J (a deliberate LF, distinct from <CR>) and
+      // Alt/Meta combinations are left intact.
+      final toSend = usedModifier
+          ? result.modified
+          : result.modified.replaceAll('\r\n', '\r').replaceAll('\n', '\r');
+      widget.terminal.textInput(toSend);
       setState(() {});
     }
   }
