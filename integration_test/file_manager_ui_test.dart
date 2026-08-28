@@ -8,6 +8,7 @@ import 'package:iroh_ssh_app/models/fs_entry.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/screens/sessions_screen.dart';
+import 'package:iroh_ssh_app/services/fs/local_fs.dart';
 import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/widgets/file_manager_tab.dart';
 import 'package:path/path.dart' as p;
@@ -107,6 +108,16 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() cond) async {
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('local files start in a listable Android sandbox directory',
+      (tester) async {
+    final fs = LocalFs();
+    final root = await fs.initialDir();
+
+    await expectLater(fs.list(root), completes);
+    expect(root, isNot('/'));
+    expect(fs.parentOf(root), root);
+  });
 
   testWidgets('cached directory remains visible while Android revalidates',
       (tester) async {

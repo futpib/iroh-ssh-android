@@ -10,14 +10,38 @@ class LocalFs implements RemoteFs {
   /// Emit progress at most once per this many bytes (local copies are fast).
   static const _progressChunk = 256 * 1024;
 
+  String? _navigationRoot;
+
   @override
   String join(String dir, String name) => p.join(dir, name);
 
   @override
-  String parentOf(String path) => p.dirname(path);
+  String parentOf(String path) {
+    final normalized = p.normalize(path);
+    final root = _navigationRoot;
+    if (root == null) return p.dirname(normalized);
+    if (normalized == root || !p.isWithin(root, normalized)) return root;
+
+    final parent = p.dirname(normalized);
+    return parent == root || p.isWithin(root, parent) ? parent : root;
+  }
 
   @override
   Future<String> initialDir() async {
+    if (Platform.isAndroid) {
+      // Android does not provide HOME to the Flutter process, and its process
+      // working directory is `/`, which apps cannot enumerate. Keep local-file
+      // browsing inside the app's durable files directory: it needs no broad
+      // storage permission and avoids exposing settings and SSH keys stored in
+      // app_flutter. Directory.systemTemp is the sibling cache directory.
+      final filesDir = Directory(
+        p.join(Directory.systemTemp.parent.path, 'files'),
+      );
+      await filesDir.create(recursive: true);
+      _navigationRoot = p.normalize(filesDir.absolute.path);
+      return _navigationRoot!;
+    }
+
     final home = Platform.environment['HOME'] ??
         Platform.environment['USERPROFILE'];
     if (home != null && home.isNotEmpty && Directory(home).existsSync()) {
