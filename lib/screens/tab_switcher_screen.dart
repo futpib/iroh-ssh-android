@@ -200,7 +200,7 @@ class _TabSwitcherScreenState extends State<TabSwitcherScreen> {
             child: Icon(Icons.close, color: theme.colorScheme.onError),
           ),
           onDismissed: (_) => _close(i),
-          child: ColoredBox(
+          child: Material(
             color: isCurrent
                 ? theme.colorScheme.primaryContainer.withAlpha(80)
                 : Colors.transparent,

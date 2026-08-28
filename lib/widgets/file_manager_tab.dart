@@ -1,8 +1,10 @@
 import 'dart:io' show Platform;
+import 'dart:ui' as ui;
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
@@ -61,9 +63,13 @@ class FileManagerTabState extends State<FileManagerTab>
 
   String _cwd = '';
   List<FsEntry> _entries = [];
+  final Map<String, List<FsEntry>> _directoryCache = {};
   bool _ready = false;
   bool _loading = false;
+  bool _hasListing = false;
   String? _error;
+  int _navigationGeneration = 0;
+  final _repaintBoundaryKey = GlobalKey();
 
   void Function(Object)? _serviceDataCallback;
 
@@ -104,6 +110,17 @@ class FileManagerTabState extends State<FileManagerTab>
   /// Current directory (test-only accessor).
   @visibleForTesting
   String get cwd => _cwd;
+
+  Future<ui.Image?> captureImage({double pixelRatio = 1.0}) async {
+    final boundary = _repaintBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) return null;
+    try {
+      return await boundary.toImage(pixelRatio: pixelRatio);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Handle the Android system back button: go up one directory if possible.
   /// Returns true when the back was consumed (so the app shouldn't also exit).
@@ -229,32 +246,65 @@ class FileManagerTabState extends State<FileManagerTab>
 
   Future<void> _onReady() async {
     if (!mounted) return;
-    setState(() => _ready = true);
+    setState(() {
+      _ready = true;
+      _loading = true;
+    });
     try {
       final dir = await _fs!.initialDir();
+      if (!mounted) return;
       await _navigateTo(dir);
     } catch (e) {
-      if (mounted) setState(() => _error = _messageOf(e));
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = _messageOf(e);
+        });
+      }
     }
   }
 
   Future<void> _navigateTo(String path) async {
+    // Paint the last successful listing for this path immediately, then
+    // replace it after the remote filesystem responds.
+    final generation = ++_navigationGeneration;
+    final cachedEntries = _directoryCache[path];
+    final previousPath = _cwd;
+    final previousEntries = _entries;
+    final hadPreviousListing = _hasListing;
+
     setState(() {
+      _cwd = path;
+      _entries = cachedEntries ?? const <FsEntry>[];
+      _hasListing = cachedEntries != null;
       _loading = true;
       _error = null;
     });
     try {
       final entries = await _fs!.list(path);
       _sortEntries(entries);
-      if (!mounted) return;
+      // A slower request for a directory the user already left must not replace
+      // the visible listing selected by a newer navigation.
+      if (!mounted || generation != _navigationGeneration) return;
+      final snapshot = List<FsEntry>.unmodifiable(entries);
+      _directoryCache[path] = snapshot;
       setState(() {
-        _cwd = path;
-        _entries = entries;
+        _entries = snapshot;
+        _hasListing = true;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (!mounted || generation != _navigationGeneration) return;
+      setState(() {
+        _loading = false;
+        if (cachedEntries == null && hadPreviousListing) {
+          _cwd = previousPath;
+          _entries = previousEntries;
+          _hasListing = true;
+        } else if (cachedEntries == null) {
+          _error = _messageOf(e);
+        }
+      });
       _showError(e);
     }
   }
@@ -534,55 +584,58 @@ class FileManagerTabState extends State<FileManagerTab>
   Widget build(BuildContext context) {
     super.build(context);
     final theme = Theme.of(context);
-    return Column(
-      children: [
-        Material(
-          color: theme.colorScheme.surfaceContainerHighest,
-          child: SafeArea(
-            top: true,
-            bottom: false,
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_upward),
-                  tooltip: 'Up',
-                  onPressed: _ready && _canGoUp ? _up : null,
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    reverse: true,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      child: Text(
-                        _cwd.isEmpty ? '…' : _cwd,
-                        style: const TextStyle(
-                            fontFamily: 'monospace', fontSize: 13),
+    return RepaintBoundary(
+      key: _repaintBoundaryKey,
+      child: Column(
+        children: [
+          Material(
+            color: theme.colorScheme.surfaceContainerHighest,
+            child: SafeArea(
+              top: true,
+              bottom: false,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_upward),
+                    tooltip: 'Up',
+                    onPressed: _ready && _canGoUp ? _up : null,
+                  ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      reverse: true,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Text(
+                          _cwd.isEmpty ? '…' : _cwd,
+                          style: const TextStyle(
+                              fontFamily: 'monospace', fontSize: 13),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  tooltip: 'Refresh',
-                  onPressed: _ready ? _refresh : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.create_new_folder_outlined),
-                  tooltip: 'New folder',
-                  onPressed: _ready ? _mkdir : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.upload_file),
-                  tooltip: 'Upload',
-                  onPressed: _ready ? _upload : null,
-                ),
-              ],
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    tooltip: 'Refresh',
+                    onPressed: _ready ? _refresh : null,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                    tooltip: 'New folder',
+                    onPressed: _ready ? _mkdir : null,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.upload_file),
+                    tooltip: 'Upload',
+                    onPressed: _ready ? _upload : null,
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        Expanded(child: _buildBody(theme)),
-      ],
+          Expanded(child: _buildBody(theme)),
+        ],
+      ),
     );
   }
 
@@ -604,59 +657,90 @@ class FileManagerTabState extends State<FileManagerTab>
         ),
       );
     }
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_entries.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: _refresh,
-        child: ListView(
-          children: const [
-            SizedBox(height: 120),
-            Center(child: Text('Empty folder')),
-          ],
-        ),
+    if (!_hasListing) {
+      return Center(
+        child: _loading
+            ? const CircularProgressIndicator()
+            : Text(
+                _error ?? 'Empty folder',
+                textAlign: TextAlign.center,
+                style: _error == null
+                    ? null
+                    : TextStyle(color: theme.colorScheme.error),
+              ),
       );
     }
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      child: ListView.builder(
-        itemCount: _entries.length,
-        itemBuilder: (context, i) {
-          final entry = _entries[i];
-          return ListTile(
-            leading: Icon(
-              entry.isDir
-                  ? Icons.folder
-                  : entry.isLink
-                      ? Icons.link
-                      : Icons.insert_drive_file_outlined,
-              color: entry.isDir ? theme.colorScheme.primary : null,
-            ),
-            title: Text(entry.name, overflow: TextOverflow.ellipsis),
-            subtitle: Text(_entrySubtitle(entry)),
-            trailing: PopupMenuButton<String>(
-              onSelected: (v) {
-                switch (v) {
-                  case 'download':
-                    _download(entry);
-                  case 'rename':
-                    _rename(entry);
-                  case 'delete':
-                    _delete(entry);
-                }
-              },
-              itemBuilder: (ctx) => [
-                if (!entry.isDir)
-                  const PopupMenuItem(
-                      value: 'download', child: Text('Download')),
-                const PopupMenuItem(value: 'rename', child: Text('Rename')),
-                const PopupMenuItem(value: 'delete', child: Text('Delete')),
+
+    final listing = _entries.isEmpty
+        ? RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              children: const [
+                SizedBox(height: 120),
+                Center(child: Text('Empty folder')),
               ],
             ),
-            onTap: () => _onTapEntry(entry),
-            onLongPress: () => _showEntryActions(entry),
+          )
+        : RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView.builder(
+              itemCount: _entries.length,
+              itemBuilder: (context, i) {
+                final entry = _entries[i];
+                return ListTile(
+                  leading: Icon(
+                    entry.isDir
+                        ? Icons.folder
+                        : entry.isLink
+                        ? Icons.link
+                        : Icons.insert_drive_file_outlined,
+                    color: entry.isDir ? theme.colorScheme.primary : null,
+                  ),
+                  title: Text(entry.name, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(_entrySubtitle(entry)),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (v) {
+                      switch (v) {
+                        case 'download':
+                          _download(entry);
+                        case 'rename':
+                          _rename(entry);
+                        case 'delete':
+                          _delete(entry);
+                      }
+                    },
+                    itemBuilder: (ctx) => [
+                      if (!entry.isDir)
+                        const PopupMenuItem(
+                            value: 'download', child: Text('Download')),
+                      const PopupMenuItem(
+                          value: 'rename', child: Text('Rename')),
+                      const PopupMenuItem(
+                          value: 'delete', child: Text('Delete')),
+                    ],
+                  ),
+                  onTap: () => _onTapEntry(entry),
+                  onLongPress: () => _showEntryActions(entry),
+                );
+              },
+            ),
           );
-        },
-      ),
+
+    return Stack(
+      children: [
+        Positioned.fill(child: listing),
+        if (_loading)
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(
+              key: Key('directory-refresh-indicator'),
+              minHeight: 2,
+              semanticsLabel: 'Refreshing directory',
+            ),
+          ),
+      ],
     );
   }
 
@@ -723,4 +807,3 @@ class _PromptDialogState extends State<_PromptDialog> {
     );
   }
 }
-

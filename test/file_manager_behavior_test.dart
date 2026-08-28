@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -48,6 +50,48 @@ class FakeRemoteFs implements RemoteFs {
   Future<void> close() async {}
 }
 
+class RevalidatingRemoteFs extends FakeRemoteFs {
+  RevalidatingRemoteFs() : super(initial: '/home/user');
+
+  final parentRevalidation = Completer<List<FsEntry>>();
+  var parentListCalls = 0;
+
+  @override
+  Future<List<FsEntry>> list(String path) {
+    if (path == '/home/user') {
+      parentListCalls++;
+      if (parentListCalls == 1) {
+        return Future.value([
+          const FsEntry(
+            name: 'sub',
+            path: '/home/user/sub',
+            isDir: true,
+            isLink: false,
+          ),
+          const FsEntry(
+            name: 'stale.txt',
+            path: '/home/user/stale.txt',
+            isDir: false,
+            isLink: false,
+          ),
+        ]);
+      }
+      return parentRevalidation.future;
+    }
+    if (path == '/home/user/sub') {
+      return Future.value([
+        const FsEntry(
+          name: 'inside.txt',
+          path: '/home/user/sub/inside.txt',
+          isDir: false,
+          isLink: false,
+        ),
+      ]);
+    }
+    return Future.value(<FsEntry>[]);
+  }
+}
+
 const _session = SshSessionInfo(
   sessionId: 's',
   host: 'h',
@@ -67,6 +111,103 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() cond) async {
 }
 
 void main() {
+  testWidgets('revisiting a directory shows its cached list while refreshing', (
+    tester,
+  ) async {
+    final fs = RevalidatingRemoteFs();
+    final key = GlobalKey<FileManagerTabState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FileManagerTab(
+            key: key,
+            session: _session,
+            onDisconnected: () {},
+            connectOnInit: false,
+            testFs: fs,
+          ),
+        ),
+      ),
+    );
+    await _pumpUntil(tester, () => find.text('sub').evaluate().isNotEmpty);
+
+    expect(key.currentState!.cwd, '/home/user');
+    await tester.tap(find.widgetWithText(ListTile, 'sub'));
+    await _pumpUntil(
+      tester,
+      () => find.text('inside.txt').evaluate().isNotEmpty,
+    );
+    expect(key.currentState!.cwd, '/home/user/sub');
+    expect(find.text('inside.txt'), findsOneWidget);
+
+    expect(key.currentState!.handleBack(), isTrue);
+    await tester.pump();
+
+    expect(key.currentState!.cwd, '/home/user');
+    expect(
+      find.text('stale.txt'),
+      findsOneWidget,
+      reason: 'the last successful listing should remain visible',
+    );
+    expect(
+      find.byKey(const Key('directory-refresh-indicator')),
+      findsOneWidget,
+      reason: 'stale content should carry a restrained refresh cue',
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    fs.parentRevalidation.complete([
+      const FsEntry(
+        name: 'fresh.txt',
+        path: '/home/user/fresh.txt',
+        isDir: false,
+        isLink: false,
+      ),
+    ]);
+    await _pumpUntil(
+      tester,
+      () => find.text('fresh.txt').evaluate().isNotEmpty,
+    );
+
+    expect(find.text('stale.txt'), findsNothing);
+    expect(find.byKey(const Key('directory-refresh-indicator')), findsNothing);
+  });
+
+  testWidgets('file tabs have thumbnails in list and grid tab switcher',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: SessionsScreen(
+        existingSessions: const [
+          SshSessionInfo(
+            sessionId: 'files',
+            host: 'h',
+            port: 22,
+            username: 'u',
+            displayName: 'Remote files',
+            connectionType: ConnectionType.ssh,
+            kind: TabKind.files,
+          ),
+        ],
+        connectOnInit: false,
+        testFs: RevalidatingRemoteFs(),
+      ),
+    ));
+    await _pumpUntil(tester, () => find.text('stale.txt').evaluate().isNotEmpty);
+
+    await tester.tap(find.byTooltip('Tabs'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 tab'), findsOneWidget);
+    expect(find.byType(RawImage), findsOneWidget,
+        reason: 'list view should show the file-manager capture');
+
+    await tester.tap(find.byTooltip('Grid view'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(RawImage), findsOneWidget,
+        reason: 'grid view should show the same file-manager capture');
+  });
+
   // Issue 2: the Android system back button navigates up one directory and
   // stops being consumed at the filesystem root.
   testWidgets('system back navigates up, then releases at root',

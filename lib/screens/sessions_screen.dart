@@ -142,18 +142,35 @@ class _SessionsScreenState extends State<SessionsScreen>
     if (index < 0 || index >= _sessions.length) return;
     final session = _sessions[index];
     final state = _tabKeys[session.sessionId]?.currentState;
-    // Only terminal tabs produce thumbnails; file-manager tabs are skipped.
-    if (state is! TerminalTabState) return;
-    _cursorYCache[session.sessionId] = state.cursorVerticalFraction;
-    _cursorXCache[session.sessionId] = state.cursorHorizontalFraction;
-    _viewHeightCache[session.sessionId] = state.terminalViewHeight;
+    if (state is TerminalTabState) {
+      _cacheTerminalViewport(session.sessionId, state);
+    } else if (state is! FileManagerTabState) {
+      return;
+    }
     final pixelRatio = MediaQuery.of(context).devicePixelRatio;
     final captureRatio = (pixelRatio * 0.5).clamp(0.5, 1.5);
-    state.captureImage(pixelRatio: captureRatio).then((image) {
+    _captureStateImage(state, pixelRatio: captureRatio).then((image) {
       if (image != null) {
         _thumbnailCache[session.sessionId] = image;
       }
     });
+  }
+
+  Future<ui.Image?> _captureStateImage(State? state,
+      {required double pixelRatio}) {
+    if (state is TerminalTabState) {
+      return state.captureImage(pixelRatio: pixelRatio);
+    }
+    if (state is FileManagerTabState) {
+      return state.captureImage(pixelRatio: pixelRatio);
+    }
+    return Future.value(null);
+  }
+
+  void _cacheTerminalViewport(String sessionId, TerminalTabState state) {
+    _cursorYCache[sessionId] = state.cursorVerticalFraction;
+    _cursorXCache[sessionId] = state.cursorHorizontalFraction;
+    _viewHeightCache[sessionId] = state.terminalViewHeight;
   }
 
   @override
@@ -402,16 +419,17 @@ class _SessionsScreenState extends State<SessionsScreen>
     // Try to capture current tab again after layout settles (without keyboard)
     final currentSession = _sessions[_tabController.index];
     final currentState = _tabKeys[currentSession.sessionId]?.currentState;
-    if (currentState is TerminalTabState) {
+    if (currentState is TerminalTabState || currentState is FileManagerTabState) {
       final pixelRatio = MediaQuery.of(context).devicePixelRatio;
       final captureRatio = (pixelRatio * 0.5).clamp(0.5, 1.5);
-      final image = await currentState.captureImage(pixelRatio: captureRatio);
+      final image = await _captureStateImage(currentState,
+          pixelRatio: captureRatio);
       if (image != null) {
         _thumbnailCache[currentSession.sessionId] = image;
       }
-      _cursorYCache[currentSession.sessionId] = currentState.cursorVerticalFraction;
-      _cursorXCache[currentSession.sessionId] = currentState.cursorHorizontalFraction;
-      _viewHeightCache[currentSession.sessionId] = currentState.terminalViewHeight;
+      if (currentState is TerminalTabState) {
+        _cacheTerminalViewport(currentSession.sessionId, currentState);
+      }
     }
 
     if (!mounted) return;
