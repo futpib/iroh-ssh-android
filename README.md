@@ -2,7 +2,7 @@
 
 An Android SSH client powered by [iroh](https://iroh.computer/) for peer-to-peer connections.
 
-[<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" height="80" alt="Get it on Obtainium">](https://apps.obtainium.imranr.dev/redirect.html?r=obtainium://add/https://github.com/futpib/iroh-ssh-android)
+[<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" height="80" alt="Get it on Obtainium">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/futpib/iroh-ssh-android)
 
 ## Screenshots
 
