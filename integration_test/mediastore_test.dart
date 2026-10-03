@@ -31,8 +31,8 @@ void main() {
     // public Downloads path. (Null would mean it fell back / isn't wired.)
     expect(saved, isNotNull,
         reason: 'MediaStore.saveToDownloads returned null on-device');
-    expect(saved, contains('Downloads/'));
-    expect(saved, contains(name));
+    expect(saved!.displayPath, contains('Downloads/'));
+    expect(saved.displayPath, contains(name));
 
     // Print the name so an external `adb` check can confirm it really landed.
     // ignore: avoid_print

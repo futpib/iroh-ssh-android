@@ -12,6 +12,11 @@ class LocalFs implements RemoteFs {
 
   String? _navigationRoot;
 
+  LocalFs({String? root})
+    : _navigationRoot = root == null ? null : p.normalize(p.absolute(root));
+
+  String? get navigationRoot => _navigationRoot;
+
   @override
   String join(String dir, String name) => p.join(dir, name);
 
@@ -28,6 +33,7 @@ class LocalFs implements RemoteFs {
 
   @override
   Future<String> initialDir() async {
+    if (_navigationRoot != null) return _navigationRoot!;
     if (Platform.isAndroid) {
       // Android does not provide HOME to the Flutter process, and its process
       // working directory is `/`, which apps cannot enumerate. Keep local-file
@@ -52,6 +58,7 @@ class LocalFs implements RemoteFs {
 
   @override
   Future<List<FsEntry>> list(String path) async {
+    await _checkPath(path);
     final entries = <FsEntry>[];
     await for (final entity in Directory(path).list(followLinks: false)) {
       try {
@@ -71,6 +78,7 @@ class LocalFs implements RemoteFs {
 
   @override
   Future<FsEntry> stat(String path, {bool followLink = true}) async {
+    await _checkPath(path, followLink: followLink);
     final type = await FileSystemEntity.type(path, followLinks: followLink);
     final st = await FileStat.stat(path);
     return FsEntry(
@@ -85,10 +93,15 @@ class LocalFs implements RemoteFs {
   }
 
   @override
-  Future<void> mkdir(String path) => Directory(path).create();
+  Future<void> mkdir(String path) async {
+    await _checkPath(path);
+    await Directory(path).create();
+  }
 
   @override
   Future<void> rename(String from, String to) async {
+    await _checkPath(from, followLink: false, allowRoot: false);
+    await _checkPath(to, followLink: false, allowRoot: false);
     final type = await FileSystemEntity.type(from, followLinks: false);
     if (type == FileSystemEntityType.directory) {
       await Directory(from).rename(to);
@@ -101,6 +114,7 @@ class LocalFs implements RemoteFs {
 
   @override
   Future<void> remove(String path, {bool recursive = false}) async {
+    await _checkPath(path, followLink: false, allowRoot: false);
     final type = await FileSystemEntity.type(path, followLinks: false);
     if (type == FileSystemEntityType.directory) {
       await Directory(path).delete(recursive: recursive);
@@ -112,12 +126,49 @@ class LocalFs implements RemoteFs {
   }
 
   @override
-  Stream<int> download(String remotePath, String localPath) =>
-      _copy(remotePath, localPath);
+  Stream<int> download(String remotePath, String localPath) async* {
+    await _checkPath(remotePath);
+    yield* _copy(remotePath, localPath);
+  }
 
   @override
-  Stream<int> upload(String localPath, String remotePath) =>
-      _copy(localPath, remotePath);
+  Stream<int> upload(String localPath, String remotePath) async* {
+    await _checkPath(remotePath);
+    yield* _copy(localPath, remotePath);
+  }
+
+  // Enforce the boundary at the filesystem, including links and paths supplied
+  // by IPC or a rename dialog. The file picker/copy destination is deliberately
+  // not restricted: only the browsed side of an import/export is confined.
+  Future<void> _checkPath(
+    String path, {
+    bool followLink = true,
+    bool allowRoot = true,
+  }) async {
+    if (Platform.isAndroid && _navigationRoot == null) await initialDir();
+    final root = _navigationRoot;
+    if (root == null) return;
+    final normalized = p.normalize(p.absolute(path));
+    if ((!allowRoot && normalized == root) ||
+        (normalized != root && !p.isWithin(root, normalized))) {
+      throw FileSystemException('Path is outside local files', path);
+    }
+    final realRoot = await Directory(root).resolveSymbolicLinks();
+    // For unlink/rename, inspect the parent without following the final link.
+    var candidate = followLink || normalized == root ? path : p.dirname(path);
+    while (await FileSystemEntity.type(candidate, followLinks: false) ==
+        FileSystemEntityType.notFound) {
+      final parent = p.dirname(candidate);
+      if (parent == candidate) {
+        throw FileSystemException('Cannot resolve local path', path);
+      }
+      candidate = parent;
+    }
+    final resolved = await File(candidate).resolveSymbolicLinks();
+    if (resolved != realRoot && !p.isWithin(realRoot, resolved)) {
+      throw FileSystemException('Link is outside local files', path);
+    }
+  }
 
   @override
   Future<void> close() async {}

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:iroh_ssh_app/services/known_hosts.dart';
+
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/fs_entry.dart';
 import 'package:iroh_ssh_app/models/tab_kind.dart';
@@ -23,6 +25,7 @@ sealed class ServiceCommand {
       'attach' => AttachCommand.fromJson(json),
       'detach' => DetachCommand.fromJson(json),
       'list_sessions' => ListSessionsCommand(),
+      'host_key_response' => HostKeyResponseCommand.fromJson(json),
       'auth_response' => AuthResponseCommand.fromJson(json),
       'reconnect' => ReconnectCommand.fromJson(json),
       'sftp_list' => SftpListCommand.fromJson(json),
@@ -392,12 +395,12 @@ class SftpDownloadCommand extends ServiceCommand {
   final String requestId;
   final String remotePath;
 
-  /// Where the service writes the bytes. On Android this is a temp/cache path;
-  /// when [publishName] is set the service then publishes it to public Downloads.
+  /// Destination for a download without publication. Ignored when [publishName]
+  /// is set: the service allocates a unique, recoverable staging file.
   final String localPath;
 
-  /// If set, after the transfer the service publishes [localPath] into the
-  /// device's public Downloads under this name (and removes the temp file).
+  /// If set, publish the service-owned staging file to public Downloads under
+  /// this name. Retain a local copy if publication is unavailable or fails.
   final String? publishName;
 
   SftpDownloadCommand({
@@ -522,6 +525,7 @@ sealed class ServiceEvent {
       'output' => OutputEvent.fromJson(json),
       'replay' => ReplayEvent.fromJson(json),
       'session_list' => SessionListEvent.fromJson(json),
+      'host_key_request' => HostKeyRequestEvent.fromJson(json),
       'auth_prompt' => AuthPromptEvent.fromJson(json),
       'error' => ErrorEvent.fromJson(json),
       'status' => StatusEvent.fromJson(json),
@@ -816,26 +820,30 @@ class SftpPathResultEvent extends ServiceEvent {
   final String sessionId;
   final String requestId;
   final String path;
+  final String? navigationRoot;
 
   SftpPathResultEvent({
     required this.sessionId,
     required this.requestId,
     required this.path,
+    this.navigationRoot,
   });
 
   @override
   Map<String, dynamic> toJson() => {
-        'type': 'sftp_path_result',
-        'sessionId': sessionId,
-        'requestId': requestId,
-        'path': path,
-      };
+    'type': 'sftp_path_result',
+    'sessionId': sessionId,
+    'requestId': requestId,
+    'path': path,
+    if (navigationRoot != null) 'navigationRoot': navigationRoot,
+  };
 
   factory SftpPathResultEvent.fromJson(Map<String, dynamic> json) =>
       SftpPathResultEvent(
         sessionId: json['sessionId'] as String,
         requestId: json['requestId'] as String,
         path: json['path'] as String,
+        navigationRoot: json['navigationRoot'] as String?,
       );
 }
 
@@ -958,5 +966,61 @@ class SftpErrorEvent extends ServiceEvent {
         sessionId: json['sessionId'] as String,
         requestId: json['requestId'] as String,
         message: json['message'] as String,
+      );
+}
+
+class HostKeyResponseCommand extends ServiceCommand {
+  final String sessionId;
+  final String requestId;
+  final bool accepted;
+
+  HostKeyResponseCommand({
+    required this.sessionId,
+    required this.requestId,
+    required this.accepted,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'host_key_response',
+    'sessionId': sessionId,
+    'requestId': requestId,
+    'accepted': accepted,
+  };
+
+  factory HostKeyResponseCommand.fromJson(Map<String, dynamic> json) =>
+      HostKeyResponseCommand(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        accepted: json['accepted'] as bool,
+      );
+}
+
+class HostKeyRequestEvent extends ServiceEvent {
+  final String sessionId;
+  final String requestId;
+  final HostKeyChallenge challenge;
+
+  HostKeyRequestEvent({
+    required this.sessionId,
+    required this.requestId,
+    required this.challenge,
+  });
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'host_key_request',
+    'sessionId': sessionId,
+    'requestId': requestId,
+    'challenge': challenge.toJson(),
+  };
+
+  factory HostKeyRequestEvent.fromJson(Map<String, dynamic> json) =>
+      HostKeyRequestEvent(
+        sessionId: json['sessionId'] as String,
+        requestId: json['requestId'] as String,
+        challenge: HostKeyChallenge.fromJson(
+          json['challenge'] as Map<String, dynamic>,
+        ),
       );
 }

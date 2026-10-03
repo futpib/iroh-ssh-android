@@ -71,6 +71,8 @@ class SshSessionService extends TaskHandler {
         _handleDetach(command);
       case ListSessionsCommand():
         _handleListSessions();
+      case HostKeyResponseCommand():
+        _sessions[command.sessionId]?.handleHostKeyResponse(command);
       case AuthResponseCommand():
         _handleAuthResponse(command);
       case SftpListCommand() ||

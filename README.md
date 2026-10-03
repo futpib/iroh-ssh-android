@@ -22,8 +22,9 @@ The app is built with Flutter and bridges to a Rust core ([iroh-ssh](https://git
 ## Features
 
 - **P2P SSH connections** — connect using `user@<endpoint-id>` without a public IP
-- **Direct SSH connections** — connect to any host directly via `user@host` or `user@host:port`
+- **Direct SSH connections** — connect via `user@host` or `user@host:port`, with persistent host-key trust and explicit confirmation for new or changed keys
 - **Local shell** — open a local terminal session on the device
+- **File manager** — browse SFTP or app-owned local files; downloads publish to Android Downloads. If publication is unavailable or fails, the copy remains under **Local → Files → downloads**, at the location shown in the notification.
 - **Multiple sessions** — manage several concurrent sessions in tabs
 - **Terminal emulator** — full xterm-compatible terminal with configurable font size and colour theme
 - **SSH key management** — generate Ed25519 keys, import existing keys (PEM), copy/export public keys, and export private keys (protected by biometric authentication on Android)

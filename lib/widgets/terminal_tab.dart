@@ -13,6 +13,8 @@ import 'package:flutter_pty/flutter_pty.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/known_hosts.dart';
+import 'package:iroh_ssh_app/widgets/host_key_dialog.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/widgets/session_tab_controller.dart';
@@ -66,6 +68,7 @@ class TerminalTabState extends State<TerminalTab>
 
   // --- IPC mode (Android) ---
   void Function(Object)? _serviceDataCallback;
+  String? _lastHostKeyRequest;
   Completer<String>? _ipcAuthCompleter;
   StringBuffer _ipcAuthBuffer = StringBuffer();
   bool _ipcAuthEcho = true;
@@ -217,15 +220,16 @@ class TerminalTabState extends State<TerminalTab>
             final bytes = base64Decode(event.dataBase64);
             _terminal.write(utf8.decode(bytes, allowMalformed: true));
           }
+        case HostKeyRequestEvent()
+            when event.sessionId == widget.session.sessionId:
+          _handleHostKeyRequest(event);
         case AuthPromptEvent()
             when event.sessionId == widget.session.sessionId:
           _handleIpcAuthPrompt(event.prompt, event.echo);
         case DisconnectedEvent()
             when event.sessionId == widget.session.sessionId:
           _terminal.write('\r\nDisconnected: ${event.reason}\r\n');
-          if (mounted) {
-            widget.onDisconnected();
-          }
+        // SessionsScreen owns Android disconnect events.
         case StatusEvent() when event.sessionId == widget.session.sessionId:
           _terminal.write('${event.message}\r\n');
         case ErrorEvent() when event.sessionId == widget.session.sessionId:
@@ -313,6 +317,35 @@ class TerminalTabState extends State<TerminalTab>
   // =========================================================================
   // Direct mode (non-Android)
   // =========================================================================
+
+  Future<void> _handleHostKeyRequest(HostKeyRequestEvent event) async {
+    if (!mounted || _lastHostKeyRequest == event.requestId) return;
+    _lastHostKeyRequest = event.requestId;
+    final accepted = await confirmHostKey(context, event.challenge);
+    FlutterForegroundTask.sendDataToTask(
+      HostKeyResponseCommand(
+        sessionId: event.sessionId,
+        requestId: event.requestId,
+        accepted: mounted && accepted,
+      ).encode(),
+    );
+  }
+
+  Future<bool> _verifyHostKey(String type, List<int> fingerprint) =>
+      KnownHosts.instance.verify(
+        host: widget.session.host,
+        port: widget.session.port,
+        keyType: type,
+        fingerprint: fingerprint,
+        confirm: (challenge) async {
+          if (!mounted) return false;
+          final accepted = await confirmHostKey(context, challenge);
+          return mounted && accepted;
+        },
+      ).catchError((Object error) {
+        _terminal.write('\r\nCould not verify SSH host key: $error\r\n');
+        return false;
+      });
 
   void _connectDirect() {
     switch (widget.session.connectionType) {
@@ -453,6 +486,10 @@ class TerminalTabState extends State<TerminalTab>
         socket,
         username: widget.session.username,
         identities: identities,
+        // Iroh authenticates its endpoint; direct SSH needs a pinned host key.
+        onVerifyHostKey: widget.session.connectionType == ConnectionType.ssh
+            ? _verifyHostKey
+            : null,
         onPasswordRequest: () async {
           _terminal.write('Password: ');
           return await _readLineFromTerminal(echo: false);

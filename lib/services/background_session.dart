@@ -9,6 +9,8 @@ import 'package:flutter_pty/flutter_pty.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/services/fs/local_fs.dart';
+import 'package:iroh_ssh_app/services/download_storage.dart';
+import 'package:iroh_ssh_app/services/known_hosts.dart';
 import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
 import 'package:iroh_ssh_app/services/fs/upload_naming.dart';
@@ -30,13 +32,14 @@ class TransferInfo {
   final String label;
   final bool isUpload;
 
-  /// Local file the bytes are written to (download) or read from (upload). For
-  /// a download this is a temp/cache path that is cleaned up afterwards.
+  /// Local file written by a download or read by an upload. Managed downloads
+  /// are staged durably until publication succeeds.
   final String localPath;
 
   /// For a download: if set, publish [localPath] to public Downloads under this
   /// name when finished. Null for uploads.
   final String? publishName;
+  final DownloadFile? downloadFile;
 
   int? total; // filled in asynchronously once the size is known
   int transferred = 0;
@@ -51,6 +54,7 @@ class TransferInfo {
     required this.isUpload,
     required this.localPath,
     this.publishName,
+    this.downloadFile,
     this.total,
   });
 }
@@ -63,6 +67,12 @@ class BackgroundSession {
   final List<SSHKeyPair> identities;
   final ConnectionType connectionType;
   final TabKind kind;
+  final DownloadStorage downloadStorage;
+  final KnownHosts knownHosts;
+  Completer<bool>? _hostKeyCompleter;
+  HostKeyRequestEvent? _hostKeyRequest;
+  int _hostKeyCounter = 0;
+  int _connectionGeneration = 0;
 
   /// Connection parameters needed for reconnection.
   final String? endpointId;
@@ -132,7 +142,10 @@ class BackgroundSession {
     this.maxRemoteNatTraversalAddresses,
     this.sshHost,
     this.sshPort,
-  });
+    DownloadStorage? downloadStorage,
+    KnownHosts? knownHosts,
+  }) : downloadStorage = downloadStorage ?? DownloadStorage(),
+       knownHosts = knownHosts ?? KnownHosts.instance;
 
   Future<void> connect() async {
     switch (connectionType) {
@@ -163,6 +176,10 @@ class BackgroundSession {
         socket,
         username: username,
         identities: identities,
+        // Iroh authenticates its endpoint; direct SSH must verify the host key.
+        onVerifyHostKey: connectionType == ConnectionType.ssh
+            ? verifyHostKey
+            : null,
         onPasswordRequest: () async {
           return await _requestAuth('Password: ', echo: false);
         },
@@ -214,6 +231,8 @@ class BackgroundSession {
         });
       }
     } catch (e) {
+      _client?.close();
+      _cancelHostKeyRequest();
       final errorMsg = '\r\nError: $e\r\n';
       final bytes = utf8.encode(errorMsg);
       replayBuffer.write(bytes);
@@ -221,6 +240,57 @@ class BackgroundSession {
       state = SessionState.disconnected;
       _sendError(e.toString());
     }
+  }
+
+  @visibleForTesting
+  Future<bool> verifyHostKey(String type, List<int> fingerprint) async {
+    final generation = _connectionGeneration;
+    final accepted = await knownHosts.verify(
+      host: sshHost!,
+      port: sshPort ?? 22,
+      keyType: type,
+      fingerprint: fingerprint,
+      confirm: (challenge) async {
+        if (generation != _connectionGeneration ||
+            state == SessionState.disconnected) {
+          return false;
+        }
+        final completer = Completer<bool>();
+        _hostKeyCompleter = completer;
+        _hostKeyRequest = HostKeyRequestEvent(
+          sessionId: sessionId,
+          requestId: 'host_key_${_hostKeyCounter++}',
+          challenge: challenge,
+        );
+        if (uiAttached) onSendToUi?.call(_hostKeyRequest!.encode());
+        final trusted = await completer.future;
+        _hostKeyRequest = null;
+        _hostKeyCompleter = null;
+        return trusted && generation == _connectionGeneration;
+      },
+    ).catchError((Object error) {
+      _sendError('Could not verify SSH host key: $error');
+      return false;
+    });
+    return accepted &&
+        generation == _connectionGeneration &&
+        state != SessionState.disconnected;
+  }
+
+  void handleHostKeyResponse(HostKeyResponseCommand command) {
+    if (command.sessionId == sessionId &&
+        command.requestId == _hostKeyRequest?.requestId &&
+        _hostKeyCompleter?.isCompleted == false) {
+      _hostKeyCompleter!.complete(command.accepted);
+    }
+  }
+
+  void _cancelHostKeyRequest() {
+    _connectionGeneration++;
+    if (_hostKeyCompleter?.isCompleted == false) {
+      _hostKeyCompleter!.complete(false);
+    }
+    _hostKeyRequest = null;
   }
 
   void _connectLocalShell() {
@@ -304,34 +374,57 @@ class BackgroundSession {
         await _sftpOk(command.requestId,
             () => _fs!.remove(command.path, recursive: command.recursive));
       case SftpDownloadCommand():
-        // Register the transfer synchronously so a fast cancel can find it,
-        // then resolve the size for the notification's progress % in parallel.
-        _sftpTransfer(
-          command.requestId,
-          label: p.posix.basename(command.remotePath),
-          isUpload: false,
-          localPath: command.localPath,
-          publishName: command.publishName,
-          open: () => _fs!.download(command.remotePath, command.localPath),
-        );
-        _resolveTotal(
-            command.requestId, () => _statSizeQuietly(command.remotePath));
+        await _sftpDownload(command);
       case SftpUploadCommand():
         await _sftpUpload(command);
       case SftpInitialDirCommand():
         await _sftpGuarded(command.requestId, () async {
           final dir = await _fs!.initialDir();
-          _sendSftp(SftpPathResultEvent(
-            sessionId: sessionId,
-            requestId: command.requestId,
-            path: dir,
-          ));
+          _sendSftp(
+            SftpPathResultEvent(
+              sessionId: sessionId,
+              requestId: command.requestId,
+              path: dir,
+              navigationRoot: _fs is LocalFs
+                  ? (_fs as LocalFs).navigationRoot
+                  : null,
+            ),
+          );
         });
       case SftpCancelCommand():
         await cancelTransfer(command.requestId);
       default:
         break;
     }
+  }
+
+  Future<void> _sftpDownload(SftpDownloadCommand command) async {
+    await _sftpGuarded(command.requestId, () async {
+      final fs = _fs!;
+      final file = command.publishName == null
+          ? null
+          : await downloadStorage.create(command.publishName!);
+      // A tab can disconnect while storage is being allocated. No notification
+      // (and thus no Cancel action) exists until registration below.
+      if (_fs != fs) {
+        await file?.delete();
+        return;
+      }
+      final localPath = file?.path ?? command.localPath;
+      _sftpTransfer(
+        command.requestId,
+        label: p.posix.basename(command.remotePath),
+        isUpload: false,
+        localPath: localPath,
+        publishName: command.publishName,
+        downloadFile: file,
+        open: () => fs.download(command.remotePath, localPath),
+      );
+      _resolveTotal(
+        command.requestId,
+        () => _statSizeQuietly(command.remotePath),
+      );
+    });
   }
 
   /// Start an upload, first choosing a non-clobbering remote name: uploading a
@@ -375,16 +468,16 @@ class BackgroundSession {
     final info = _activeTransfers.remove(requestId);
     if (info == null) return;
     await info.sub.cancel();
-    if (!info.isUpload) await _deleteQuietly(info.localPath);
+    if (!info.isUpload) await _deleteDownload(info);
     await notifications?.cancel(requestId);
   }
 
   /// Abort every in-flight transfer (on disconnect/reconnect): cancel the
   /// subscription, drop any partial download temp file, and clear its notification.
   Future<void> _abortAllTransfers() async {
-    for (final entry in _activeTransfers.entries) {
+    for (final entry in _activeTransfers.entries.toList()) {
       await entry.value.sub.cancel();
-      if (!entry.value.isUpload) await _deleteQuietly(entry.value.localPath);
+      if (!entry.value.isUpload) await _deleteDownload(entry.value);
       await notifications?.cancel(entry.key);
     }
     _activeTransfers.clear();
@@ -456,6 +549,7 @@ class BackgroundSession {
     required bool isUpload,
     required String localPath,
     String? publishName,
+    DownloadFile? downloadFile,
     required Stream<int> Function() open,
   }) {
     if (_fs == null) {
@@ -471,6 +565,7 @@ class BackgroundSession {
       isUpload: isUpload,
       localPath: localPath,
       publishName: publishName,
+      downloadFile: downloadFile,
     );
     info.sub = open().listen(
       (transferred) {
@@ -489,7 +584,7 @@ class BackgroundSession {
       },
       onError: (e) {
         _activeTransfers.remove(requestId);
-        if (!isUpload) _deleteQuietly(localPath);
+        if (!isUpload) _deleteDownload(info);
         notifications?.show(
           requestId: requestId,
           title: label,
@@ -531,12 +626,40 @@ class BackgroundSession {
     if (info.isUpload) {
       resultText = 'Uploaded';
     } else if (info.publishName != null) {
-      final saved = await _publishDownload(info);
+      SavedDownload? saved;
+      try {
+        saved = await MediaStore.saveToDownloads(
+          sourcePath: info.localPath,
+          displayName: info.publishName!,
+        );
+      } catch (e) {
+        final location = info.downloadFile?.localDisplayPath ?? info.localPath;
+        final message =
+            'Could not save to Downloads: $e. File kept at $location';
+        await notifications?.show(
+          requestId: requestId,
+          title: info.label,
+          text: message,
+          isUpload: false,
+          ongoing: false,
+          showCancel: false,
+        );
+        _sendSftp(
+          SftpErrorEvent(
+            sessionId: sessionId,
+            requestId: requestId,
+            message: message,
+          ),
+        );
+        return;
+      }
       if (saved != null) {
+        await _deleteDownload(info);
         resultText = 'Saved to ${saved.displayPath}';
         openUri = saved.uri; // tapping the finished notification opens the file
       } else {
-        resultText = 'Saved';
+        final location = info.downloadFile?.localDisplayPath ?? info.localPath;
+        resultText = 'Saved to $location (public Downloads unavailable)';
       }
     } else {
       resultText = 'Saved';
@@ -554,19 +677,11 @@ class BackgroundSession {
     _sendSftp(SftpDoneEvent(sessionId: sessionId, requestId: requestId));
   }
 
-  /// Publish a finished download (temp [TransferInfo.localPath]) into the
-  /// device's public Downloads via MediaStore, then remove the temp file.
-  /// Returns the [SavedDownload] (content URI + display path), or null on failure.
-  Future<SavedDownload?> _publishDownload(TransferInfo info) async {
-    try {
-      final saved = await MediaStore.saveToDownloads(
-        sourcePath: info.localPath,
-        displayName: info.publishName!,
-      );
+  Future<void> _deleteDownload(TransferInfo info) async {
+    if (info.downloadFile != null) {
+      await info.downloadFile!.delete();
+    } else {
       await _deleteQuietly(info.localPath);
-      return saved;
-    } catch (_) {
-      return null;
     }
   }
 
@@ -664,6 +779,8 @@ class BackgroundSession {
 
   void onAttach() {
     uiAttached = true;
+    // Repeat an unanswered prompt: the first event may precede the tab mount.
+    if (_hostKeyRequest != null) onSendToUi?.call(_hostKeyRequest!.encode());
 
     if (state == SessionState.connected) {
       _sendShellReady();
@@ -685,6 +802,7 @@ class BackgroundSession {
   }
 
   Future<void> reconnect() async {
+    _cancelHostKeyRequest();
     // Clean up old connection
     _ptyOutputSubscription?.cancel();
     _ptyOutputSubscription = null;
@@ -729,6 +847,7 @@ class BackgroundSession {
   }
 
   Future<void> disconnect({String reason = 'Disconnected'}) async {
+    _cancelHostKeyRequest();
     if (state == SessionState.disconnected) return;
     state = SessionState.disconnected;
     _stdoutFlushTimer?.cancel();

@@ -17,6 +17,9 @@ jobs:
         with:
           channel: stable
 
+      - name: Install SSH handshake test server
+        run: sudo apt-get update && sudo apt-get install -y openssh-server
+
       - name: Install dependencies
         run: flutter pub get
 

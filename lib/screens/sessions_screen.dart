@@ -525,14 +525,20 @@ class _SessionsScreenState extends State<SessionsScreen>
                     ? FileManagerTab(
                         key: _tabKeys[session.sessionId],
                         session: session,
-                        onDisconnected: () => _closeSession(i),
+                        onDisconnected: () => _onSessionDisconnected(
+                          session.sessionId,
+                          'Disconnected',
+                        ),
                         connectOnInit: widget.connectOnInit,
                         testFs: widget.testFs,
                       )
                     : TerminalTab(
                         key: _tabKeys[session.sessionId],
                         session: session,
-                        onDisconnected: () => _closeSession(i),
+                        onDisconnected: () => _onSessionDisconnected(
+                          session.sessionId,
+                          'Disconnected',
+                        ),
                         connectOnInit: widget.connectOnInit,
                         fontSize: _terminalFontSize,
                         themeName: _terminalTheme,

@@ -16,6 +16,8 @@ import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
 import 'package:iroh_ssh_app/services/fs/upload_naming.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/known_hosts.dart';
+import 'package:iroh_ssh_app/widgets/host_key_dialog.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/transfer_notification.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
@@ -72,6 +74,7 @@ class FileManagerTabState extends State<FileManagerTab>
   final _repaintBoundaryKey = GlobalKey();
 
   void Function(Object)? _serviceDataCallback;
+  String? _lastHostKeyRequest;
 
   @override
   bool get wantKeepAlive => true;
@@ -157,18 +160,24 @@ class FileManagerTabState extends State<FileManagerTab>
     try {
       final event = ServiceEvent.decode(data);
       // Route SFTP responses to the proxy first.
-      _ipc?.handleEvent(event);
+      final handled = _ipc?.handleEvent(event) ?? false;
       switch (event) {
         case ShellReadyEvent() when event.sessionId == widget.session.sessionId:
           if (!_ready) _onReady();
+        case HostKeyRequestEvent()
+            when event.sessionId == widget.session.sessionId:
+          _handleHostKeyRequest(event);
         case AuthPromptEvent()
             when event.sessionId == widget.session.sessionId:
           _handleAuthPrompt(event.prompt, event.echo);
         case DisconnectedEvent()
             when event.sessionId == widget.session.sessionId:
-          if (mounted) widget.onDisconnected();
+          // SessionsScreen owns Android disconnect events.
+          break;
         case ErrorEvent() when event.sessionId == widget.session.sessionId:
           if (mounted) setState(() => _error = event.message);
+        case SftpErrorEvent() when event.sessionId == widget.session.sessionId && !handled:
+          _showError(RemoteFsException(event.message));
         case SftpDoneEvent() when event.sessionId == widget.session.sessionId:
           // A background transfer finished; refresh so a just-uploaded file
           // shows up. Progress/cancel live entirely in the notification.
@@ -191,6 +200,35 @@ class FileManagerTabState extends State<FileManagerTab>
   // Direct mode (non-Android)
   // =========================================================================
 
+  Future<void> _handleHostKeyRequest(HostKeyRequestEvent event) async {
+    if (!mounted || _lastHostKeyRequest == event.requestId) return;
+    _lastHostKeyRequest = event.requestId;
+    final accepted = await confirmHostKey(context, event.challenge);
+    FlutterForegroundTask.sendDataToTask(
+      HostKeyResponseCommand(
+        sessionId: event.sessionId,
+        requestId: event.requestId,
+        accepted: mounted && accepted,
+      ).encode(),
+    );
+  }
+
+  Future<bool> _verifyHostKey(String type, List<int> fingerprint) =>
+      KnownHosts.instance.verify(
+        host: widget.session.host,
+        port: widget.session.port,
+        keyType: type,
+        fingerprint: fingerprint,
+        confirm: (challenge) async {
+          if (!mounted) return false;
+          final accepted = await confirmHostKey(context, challenge);
+          return mounted && accepted;
+        },
+      ).catchError((Object error) {
+        _showError(RemoteFsException('Could not verify SSH host key: $error'));
+        return false;
+      });
+
   void _connectDirect() {
     switch (widget.session.connectionType) {
       case ConnectionType.iroh:
@@ -211,6 +249,10 @@ class FileManagerTabState extends State<FileManagerTab>
         socket,
         username: widget.session.username,
         identities: identities,
+        // Iroh authenticates its endpoint; direct SSH needs a pinned host key.
+        onVerifyHostKey: widget.session.connectionType == ConnectionType.ssh
+            ? _verifyHostKey
+            : null,
         onPasswordRequest: () async =>
             await _promptText('Authentication', 'Password:', obscure: true) ??
             '',
@@ -391,10 +433,9 @@ class FileManagerTabState extends State<FileManagerTab>
   Future<void> _download(FsEntry entry) async {
     if (_isAndroid) {
       // Hand the whole job to the background service: it streams the bytes to a
-      // cache file, publishes to public Downloads, and shows a progress
+      // unique staging file, publishes to public Downloads, and shows a progress
       // notification (with Cancel) — all off the UI isolate.
-      final tmp = p.join((await getTemporaryDirectory()).path, entry.name);
-      _ipc!.startDownload(entry.path, tmp, publishName: entry.name);
+      _ipc!.startDownload(entry.path, publishName: entry.name);
       _toast('Downloading ${entry.name} — see the notification for progress');
       return;
     }

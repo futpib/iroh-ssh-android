@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,7 @@ import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/fs_entry.dart';
 import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/services/background_session.dart';
+import 'package:iroh_ssh_app/services/download_storage.dart';
 import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/transfer_notifications.dart';
@@ -16,6 +18,7 @@ class _FakeFs implements RemoteFs {
   final downloadController = StreamController<int>();
   final uploadController = StreamController<int>();
   bool downloadCancelled = false;
+  String? lastDownloadLocalPath;
 
   /// Entries the directory listing reports (drives upload collision-renaming).
   List<FsEntry> existing = [];
@@ -28,8 +31,11 @@ class _FakeFs implements RemoteFs {
   }
 
   @override
-  Stream<int> download(String remotePath, String localPath) =>
-      downloadController.stream;
+  Stream<int> download(String remotePath, String localPath) {
+    lastDownloadLocalPath = localPath;
+    return downloadController.stream;
+  }
+
   @override
   Stream<int> upload(String localPath, String remotePath) {
     lastUploadRemotePath = remotePath;
@@ -75,8 +81,10 @@ void main() {
   late List<ServiceEvent> events;
   late _FakeFs fs;
   late BackgroundSession session;
+  late Directory temporary;
 
-  setUp(() {
+  setUp(() async {
+    temporary = await Directory.systemTemp.createTemp('transfer-test-');
     transferCalls = [];
     mediaCalls = [];
     events = [];
@@ -95,6 +103,7 @@ void main() {
     fs = _FakeFs();
     session = BackgroundSession(
       sessionId: 's',
+      downloadStorage: DownloadStorage(baseDirectory: () async => temporary),
       displayName: 'd',
       username: 'u',
       port: 0,
@@ -107,7 +116,8 @@ void main() {
     session.debugAttachFs(fs);
   });
 
-  tearDown(() {
+  tearDown(() async {
+    await temporary.delete(recursive: true);
     messenger.setMockMethodCallHandler(transferChannel, null);
     messenger.setMockMethodCallHandler(mediaChannel, null);
   });
@@ -133,7 +143,9 @@ void main() {
     // Published to public Downloads via MediaStore, off the UI isolate.
     expect(mediaCalls, hasLength(1));
     final args = mediaCalls.single.arguments as Map;
-    expect(args['sourcePath'], '/cache/photo.jpg');
+    expect(args['sourcePath'], fs.lastDownloadLocalPath);
+    expect(args['sourcePath'], isNot('/cache/photo.jpg'));
+    expect(await Directory(fs.lastDownloadLocalPath!).parent.exists(), isFalse);
     expect(args['displayName'], 'photo.jpg');
 
     // The notification was shown and ends in a "Saved" state.

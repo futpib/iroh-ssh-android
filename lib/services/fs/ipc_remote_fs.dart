@@ -34,6 +34,7 @@ class IpcRemoteFs implements RemoteFs {
   int _counter = 0;
   final Map<String, Completer<dynamic>> _pending = {};
   bool _closed = false;
+  String? _navigationRoot;
 
   IpcRemoteFs({required this.sessionId, required this.send});
 
@@ -44,38 +45,49 @@ class IpcRemoteFs implements RemoteFs {
 
   @override
   String parentOf(String path) {
-    final parent = p.posix.dirname(path);
+    final normalized = p.posix.normalize(path);
+    final root = _navigationRoot;
+    if (root != null &&
+        (normalized == root || !p.posix.isWithin(root, normalized))) {
+      return root;
+    }
+    final parent = p.posix.dirname(normalized);
     return parent.isEmpty ? '/' : parent;
   }
 
   /// Route a service event to the matching pending request. The tab calls this
   /// for every [ServiceEvent] it receives. Transfer lifecycle (done/error) is
   /// handled by the tab directly, not here.
-  void handleEvent(ServiceEvent event) {
+  bool handleEvent(ServiceEvent event) {
     switch (event) {
       case SftpListResultEvent() when event.sessionId == sessionId:
-        _complete(event.requestId, event.entries);
+        return _complete(event.requestId, event.entries);
       case SftpStatResultEvent() when event.sessionId == sessionId:
-        _complete(event.requestId, event.entry);
+        return _complete(event.requestId, event.entry);
       case SftpPathResultEvent() when event.sessionId == sessionId:
-        _complete(event.requestId, event.path);
+        _navigationRoot = event.navigationRoot;
+        return _complete(event.requestId, event.path);
       case SftpOkEvent() when event.sessionId == sessionId:
-        _complete(event.requestId, null);
+        return _complete(event.requestId, null);
       case SftpErrorEvent() when event.sessionId == sessionId:
-        _fail(event.requestId, RemoteFsException(event.message));
+        return _fail(event.requestId, RemoteFsException(event.message));
       default:
-        break;
+        return false;
     }
   }
 
-  void _complete(String requestId, dynamic value) {
+  bool _complete(String requestId, dynamic value) {
     final c = _pending.remove(requestId);
-    if (c != null && !c.isCompleted) c.complete(value);
+    if (c == null || c.isCompleted) return false;
+    c.complete(value);
+    return true;
   }
 
-  void _fail(String requestId, Object error) {
+  bool _fail(String requestId, Object error) {
     final c = _pending.remove(requestId);
-    if (c != null && !c.isCompleted) c.completeError(error);
+    if (c == null || c.isCompleted) return false;
+    c.completeError(error);
+    return true;
   }
 
   Future<T> _request<T>(String requestId, ServiceCommand command) {
@@ -134,9 +146,9 @@ class IpcRemoteFs implements RemoteFs {
             recursive: recursive));
   }
 
-  /// Fire a download into the service (fire-and-forget). The service writes to
-  /// [localPath] and, if [publishName] is set, publishes it to public Downloads.
-  void startDownload(String remotePath, String localPath, {String? publishName}) {
+  /// Fire a download into the service. Published downloads get a unique
+  /// service-owned staging file; [localPath] is only used without [publishName].
+  void startDownload(String remotePath, {String localPath = '', String? publishName}) {
     if (_closed) return;
     final id = _nextId();
     send(SftpDownloadCommand(

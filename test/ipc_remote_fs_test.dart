@@ -33,7 +33,7 @@ void main() {
     final fs = IpcRemoteFs(
         sessionId: 's', send: (raw) => sent.add(ServiceCommand.decode(raw)));
 
-    fs.startDownload('/remote/file.bin', '/tmp/file.bin', publishName: 'file.bin');
+    fs.startDownload('/remote/file.bin', localPath: '/tmp/file.bin', publishName: 'file.bin');
 
     final cmd = sent.single as SftpDownloadCommand;
     expect(cmd.remotePath, '/remote/file.bin');
