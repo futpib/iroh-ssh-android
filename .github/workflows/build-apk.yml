@@ -48,20 +48,31 @@ jobs:
           echo "name=$(date -u +'%y.%m.%d.%H.%M')" >> "$GITHUB_OUTPUT"
           echo "code=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
-      - name: Build default (F-Droid) APK
+      - name: Build default (F-Droid) APKs
         env:
           KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/keystore.jks', runner.temp) || '' }}
         run: |
+          mkdir -p "$RUNNER_TEMP/release-apks"
           flutter build apk --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
-          mv build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/app-release-fdroid.apk"
+          mv build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/release-apks/app-release-fdroid.apk"
+          flutter build apk --split-per-abi --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+          for ABI in armeabi-v7a arm64-v8a x86_64; do
+            mv "build/app/outputs/flutter-apk/app-${ABI}-release.apk" "$RUNNER_TEMP/release-apks/app-${ABI}-release-fdroid.apk"
+          done
 
       - name: Use ML Kit scanner
         run: cp lib/screens/qr_scanner_screen_mlkit.dart lib/screens/qr_scanner_screen.dart
 
-      - name: Build APK
+      - name: Build ML Kit APKs
         env:
           KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/keystore.jks', runner.temp) || '' }}
-        run: flutter build apk --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+        run: |
+          flutter build apk --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+          mv build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/release-apks/app-release.apk"
+          flutter build apk --split-per-abi --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+          for ABI in armeabi-v7a arm64-v8a x86_64; do
+            mv "build/app/outputs/flutter-apk/app-${ABI}-release.apk" "$RUNNER_TEMP/release-apks/app-${ABI}-release.apk"
+          done
 
       - name: Upload APKs to release
         uses: softprops/action-gh-release@v2
@@ -69,6 +80,5 @@ jobs:
           tag_name: ${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}
           name: ${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}
           body: Built from ${{ github.sha }}.
-          files: |
-            build/app/outputs/flutter-apk/app-release.apk
-            ${{ runner.temp }}/app-release-fdroid.apk
+          fail_on_unmatched_files: true
+          files: ${{ runner.temp }}/release-apks/*.apk

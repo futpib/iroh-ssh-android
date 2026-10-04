@@ -34,6 +34,24 @@ The app is built with Flutter and bridges to a Rust core ([iroh-ssh](https://git
 - **Configurable relay servers** — use iroh's default relays, add custom relay URLs, or disable relays entirely
 - **Cross-platform** — primarily Android; also runs on Linux and macOS (no foreground service)
 
+## APK downloads
+
+The **Build APK** workflow publishes a universal APK and smaller, standalone
+APKs for each supported architecture. Install one APK that matches your device;
+these do not require a split-APK installer.
+
+| Architecture | ML Kit scanner | F-Droid scanner |
+|---|---|---|
+| Universal | `app-release.apk` | `app-release-fdroid.apk` |
+| ARM64 (`arm64-v8a`) | `app-arm64-v8a-release.apk` | `app-arm64-v8a-release-fdroid.apk` |
+| ARMv7 (`armeabi-v7a`) | `app-armeabi-v7a-release.apk` | `app-armeabi-v7a-release-fdroid.apk` |
+| x86_64 | `app-x86_64-release.apk` | `app-x86_64-release-fdroid.apk` |
+
+Use ARM64 for most current phones, or the universal APK if unsure. When updating,
+keep the same APK architecture: Flutter gives per-ABI APKs different version-code
+offsets, so switching back to a universal APK can be treated as a downgrade.
+All APKs in a release use the same version name and signing configuration.
+
 ## Usage
 
 ### iroh P2P connection
