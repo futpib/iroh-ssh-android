@@ -6,22 +6,46 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/services/update_checker.dart';
+import 'package:iroh_ssh_app/services/update_release.dart';
 import 'package:iroh_ssh_app/widgets/update_settings.dart';
 
 class FakeChecker extends UpdateChecker {
   int checks = 0;
   bool enabled = true;
-  Future<String?> Function() result = () async => '26.10.06.22.00+30';
+  Future<UpdateRelease?> Function() result = () async => testRelease;
   @override
   Future<bool> isEnabled() async => enabled;
   @override
-  Future<String?> check() {
+  Future<UpdateRelease?> check() {
     checks++;
     return result();
   }
 }
 
+final testRelease = UpdateRelease(
+  tag: '26.10.06.22.00+30',
+  assetName: 'app-release-fdroid.apk',
+  url: Uri.https('github.com', '/test'),
+  digest: 'a' * 64,
+  size: 4,
+);
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    SettingsStorage.instance.cache = AppSettings();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          UpdateChecker.channel,
+          (call) async =>
+              call.method == 'updateState' ? <String, dynamic>{} : null,
+        );
+  });
+  tearDown(() {
+    SettingsStorage.instance.cache = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(UpdateChecker.channel, null);
+  });
   testWidgets(
     'startup off makes no request; enabled notice opens release once',
     (tester) async {
@@ -41,24 +65,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(checker.checks, 1);
       expect(find.textContaining('update available'), findsOneWidget);
-      var opens = 0;
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        UpdateChecker.channel,
-        (call) async {
-          expect(call.method, 'openRelease');
-          opens++;
-          return null;
-        },
-      );
-      await tester.tap(find.text('View release'));
+      await tester.tap(find.text('Update'));
       await tester.pumpAndSettle();
-      expect(opens, 1);
-      await tester.pumpWidget(app(const ValueKey(2)));
+      expect(find.text('Updates'), findsOneWidget);
+      expect(find.textContaining('Download update'), findsOneWidget);
       expect(checker.checks, 1);
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        UpdateChecker.channel,
-        null,
-      );
     },
   );
 
@@ -77,12 +88,12 @@ void main() {
       await tester.pumpWidget(app(const ValueKey(1)));
       await tester.pumpAndSettle();
       expect(find.byType(SnackBar), findsNothing);
-      final pending = Completer<String?>();
+      final pending = Completer<UpdateRelease?>();
       checker.result = () => pending.future;
       await tester.pumpWidget(app(const ValueKey(2)));
       await tester.pump();
       checker.enabled = false;
-      pending.complete('26.10.06+30');
+      pending.complete(testRelease);
       await tester.pumpAndSettle();
       expect(find.byType(SnackBar), findsNothing);
     },
@@ -104,7 +115,7 @@ void main() {
       );
       await tester.tap(find.text('Check now'));
       await tester.pumpAndSettle();
-      expect(find.text('View release'), findsOneWidget);
+      expect(find.textContaining('Download update'), findsOneWidget);
       checker.result = () async => null;
       await tester.tap(find.text('Check now'));
       await tester.pumpAndSettle();
@@ -113,7 +124,7 @@ void main() {
       await tester.tap(find.text('Check now'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Could not check'), findsOneWidget);
-      expect(find.text('View release'), findsNothing);
+      expect(find.textContaining('Download update'), findsNothing);
       expect(checker.checks, 3);
     },
   );

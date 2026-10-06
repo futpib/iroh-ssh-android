@@ -37,7 +37,12 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(UpdateChecker.channel, (call) async {
           expect(call.method, 'appInfo');
-          return {'version': version, 'installer': installer};
+          return {
+            'version': version,
+            'installer': installer,
+            'assetName': 'app-release-fdroid.apk',
+            'baseCode': 29,
+          };
         });
   });
   tearDown(() {
@@ -145,7 +150,13 @@ void main() {
         'draft': false,
         'prerelease': false,
         'assets': [
-          {'name': 'app-release.apk'},
+          {
+            'name': 'app-release-fdroid.apk',
+            'size': 4,
+            'digest': 'sha256:${'a' * 64}',
+            'browser_download_url':
+                'https://github.com/futpib/iroh-ssh-android/releases/download/$tag/app-release-fdroid.apk',
+          },
         ],
       };
       try {
@@ -154,11 +165,13 @@ void main() {
         );
         body = release('26.10.06.22.00+30');
         expect(
-          await checker.check(),
+          (await checker.check())?.tag,
           '26.10.06.22.00+30',
         ); // Manual still works.
         body = release('$version+29');
         expect(await checker.check(), isNull);
+        body = release('$version+30');
+        expect((await checker.check())?.tag, '$version+30');
         body = release('26.09.01.00.00+1');
         expect(await checker.check(), isNull);
         for (final code in [403, 404, 500]) {

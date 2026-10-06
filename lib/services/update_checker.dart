@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:iroh_ssh_app/services/update_release.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 
 class UpdateChecker {
@@ -56,10 +57,11 @@ class UpdateChecker {
     return false;
   }
 
-  /// Returns a newer release tag, or null when already current.
+  /// Returns the matching APK of a newer release, or null when already current.
   /// Manual calls ignore the automatic-check preference.
-  Future<String?> check() async {
-    final installed = (await appInfo())['version'] as String?;
+  Future<UpdateRelease?> check() async {
+    final info = await appInfo();
+    final installed = info['version'] as String?;
     if (installed == null) throw const FormatException('Missing app version');
     final client = _clientFactory();
     client.connectionTimeout = const Duration(seconds: 10);
@@ -83,25 +85,32 @@ class UpdateChecker {
           }
         }
         final release = jsonDecode(body.toString()) as Map<String, dynamic>;
-        if (release['draft'] != false || release['prerelease'] != false) {
+        final tag = release['tag_name'];
+        if (release['draft'] != false ||
+            release['prerelease'] != false ||
+            tag is! String) {
           throw const FormatException('Expected a stable release');
         }
-        final tag = release['tag_name'] as String;
-        final assets = release['assets'] as List;
-        if (!assets.any(
-          (asset) =>
-              asset is Map &&
-              asset['name'] is String &&
-              (asset['name'] as String).endsWith('.apk'),
-        )) {
-          throw const FormatException('Release has no APKs');
+        final newerName = isNewer(tag, installed);
+        final sameName = !newerName && !isNewer(installed, tag);
+        final releaseCode = tag.contains('+')
+            ? int.tryParse(tag.split('+').last)
+            : null;
+        final installedCode = info['baseCode'];
+        final newerBuild =
+            sameName &&
+            releaseCode != null &&
+            installedCode is num &&
+            releaseCode > installedCode;
+        if (!newerName && !newerBuild) return null;
+        final assetName = info['assetName'] as String?;
+        if (assetName == null) {
+          throw const FormatException('Missing build variant');
         }
-        return isNewer(tag, installed) ? tag : null;
+        return UpdateRelease.fromJson(release, assetName);
       })().timeout(const Duration(seconds: 15));
     } finally {
       client.close(force: true);
     }
   }
-
-  Future<void> openRelease() => channel.invokeMethod<void>('openRelease');
 }

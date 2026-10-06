@@ -53,9 +53,9 @@ jobs:
           KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/keystore.jks', runner.temp) || '' }}
         run: |
           mkdir -p "$RUNNER_TEMP/release-apks"
-          flutter build apk --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+          flutter build apk --dart-define=UPDATE_SCANNER=fdroid --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
           mv build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/release-apks/app-release-fdroid.apk"
-          flutter build apk --split-per-abi --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+          flutter build apk --dart-define=UPDATE_SCANNER=fdroid --split-per-abi --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
           for ABI in armeabi-v7a arm64-v8a x86_64; do
             mv "build/app/outputs/flutter-apk/app-${ABI}-release.apk" "$RUNNER_TEMP/release-apks/app-${ABI}-release-fdroid.apk"
           done
@@ -67,9 +67,9 @@ jobs:
         env:
           KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/keystore.jks', runner.temp) || '' }}
         run: |
-          flutter build apk --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+          flutter build apk --dart-define=UPDATE_SCANNER=mlkit --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
           mv build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/release-apks/app-release.apk"
-          flutter build apk --split-per-abi --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
+          flutter build apk --dart-define=UPDATE_SCANNER=mlkit --split-per-abi --build-name=${{ steps.version.outputs.name }} --build-number=${{ steps.version.outputs.code }}
           for ABI in armeabi-v7a arm64-v8a x86_64; do
             mv "build/app/outputs/flutter-apk/app-${ABI}-release.apk" "$RUNNER_TEMP/release-apks/app-${ABI}-release.apk"
           done

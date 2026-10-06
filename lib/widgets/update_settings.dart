@@ -1,51 +1,81 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/services/update_checker.dart';
+import 'package:iroh_ssh_app/services/update_controller.dart';
+import 'package:iroh_ssh_app/services/update_release.dart';
 
-Future<void> openUpdateRelease(BuildContext context) async {
-  try {
-    await UpdateChecker.instance.openRelease();
-  } catch (_) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Could not open browser. Visit github.com/futpib/iroh-ssh-android/releases',
-          ),
-        ),
-      );
-    }
-  }
+void openUpdates(BuildContext context, {UpdateRelease? release}) {
+  if (release != null) UpdateController.instance.offer(release);
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Updates')),
+        body: const UpdateSettings(),
+      ),
+    ),
+  );
 }
 
 class UpdateSettings extends StatefulWidget {
-  const UpdateSettings({super.key, this.checker});
+  const UpdateSettings({super.key, this.checker, this.controller});
   final UpdateChecker? checker;
+  final UpdateController? controller;
 
   @override
   State<UpdateSettings> createState() => _UpdateSettingsState();
 }
 
-class _UpdateSettingsState extends State<UpdateSettings> {
+class _UpdateSettingsState extends State<UpdateSettings>
+    with WidgetsBindingObserver {
+  late final UpdateController _updates;
+  late final bool _ownsController;
   bool? _enabled;
-  bool _checking = false;
   bool _saving = false;
-  String? _status;
-  String? _release;
+  String? _settingsError;
+  Timer? _poll;
 
   @override
   void initState() {
     super.initState();
+    _ownsController = widget.controller == null && widget.checker != null;
+    _updates =
+        widget.controller ??
+        (widget.checker == null
+            ? UpdateController.instance
+            : UpdateController(checker: widget.checker));
+    WidgetsBinding.instance.addObserver(this);
     _load();
+    _updates.refresh();
+    _poll = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_updates.installing) _updates.refresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _poll?.cancel();
+    // Production uses the app-lifetime controller so downloads can outlive this
+    // route. Injected controllers are owned by their caller.
+    if (_ownsController) _updates.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _updates.refresh();
   }
 
   Future<void> _load() async {
     try {
-      final enabled = await (widget.checker ?? UpdateChecker.instance)
-          .isEnabled();
+      final enabled = await _updates.checker.isEnabled();
       if (mounted) setState(() => _enabled = enabled);
     } catch (_) {
-      if (mounted) setState(() => _status = 'Could not load update settings.');
+      if (mounted) {
+        setState(() => _settingsError = 'Could not load update settings.');
+      }
     }
   }
 
@@ -56,80 +86,143 @@ class _UpdateSettingsState extends State<UpdateSettings> {
       await SettingsStorage.instance.save(
         settings.copyWith(automaticUpdateChecks: value),
       );
-      if (mounted) setState(() => _enabled = value);
+      if (mounted) {
+        setState(() {
+          _enabled = value;
+          _settingsError = null;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() => _status = 'Could not save update settings.');
+      if (mounted) {
+        setState(() => _settingsError = 'Could not save update settings.');
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Future<void> _check() async {
-    setState(() {
-      _checking = true;
-      _status = null;
-      _release = null;
-    });
+  Future<void> _install() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Install update?'),
+        content: const Text(
+          'Installing restarts Iroh SSH and disconnects active terminals. Finish your work before continuing. Your saved connections and settings will be kept.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) await _updates.install();
+  }
+
+  Future<void> _discard() async {
     try {
-      final release = await (widget.checker ?? UpdateChecker.instance).check();
-      if (mounted) {
-        setState(() {
-          _release = release;
-          _status = release == null
-              ? 'You’re up to date.'
-              : 'Update available: $release';
-        });
-      }
+      await _updates.discard();
     } catch (_) {
       if (mounted) {
         setState(
-          () =>
-              _status = 'Could not check for updates. Please try again later.',
+          () => _settingsError =
+              'Could not remove the download. Please try again.',
         );
       }
-    } finally {
-      if (mounted) setState(() => _checking = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      SwitchListTile(
-        title: const Text('Automatically check for updates'),
-        subtitle: const Text(
-          'Check GitHub when the app starts. Off by default for detected Obtainium installs.',
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: _updates,
+    builder: (context, _) => ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        SwitchListTile(
+          title: const Text('Automatically check for updates'),
+          subtitle: const Text(
+            'Check GitHub when the app starts. Off by default for detected Obtainium installs.',
+          ),
+          value: _enabled ?? false,
+          onChanged: _enabled == null || _saving ? null : _toggle,
         ),
-        value: _enabled ?? false,
-        onChanged: _enabled == null || _saving ? null : _toggle,
-      ),
-      const SizedBox(height: 16),
-      FilledButton.tonal(
-        onPressed: _checking ? null : _check,
-        child: Text(_checking ? 'Checking…' : 'Check now'),
-      ),
-      if (_status != null)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Text(_status!),
+        const SizedBox(height: 16),
+        FilledButton.tonal(
+          onPressed: _updates.busy || _updates.installing || _updates.ready
+              ? null
+              : _updates.check,
+          child: Text(_updates.checking ? 'Checking…' : 'Check now'),
         ),
-      if (_release != null)
-        TextButton(
-          onPressed: () => openUpdateRelease(context),
-          child: const Text('View release'),
+        if (_settingsError != null) Text(_settingsError!),
+        if (_updates.message != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text(_updates.message!),
+          ),
+        if (_updates.downloading) ...[
+          LinearProgressIndicator(
+            value: _updates.release == null
+                ? null
+                : _updates.received / _updates.release!.size,
+          ),
+          Text(
+            '${(_updates.received / 1048576).toStringAsFixed(1)} / ${(_updates.release!.size / 1048576).toStringAsFixed(1)} MB',
+          ),
+          TextButton(
+            onPressed: _updates.cancelDownload,
+            child: const Text('Cancel download'),
+          ),
+        ],
+        if (_updates.verifying)
+          const ListTile(
+            leading: CircularProgressIndicator(),
+            title: Text('Verifying APK…'),
+          ),
+        if (_updates.release != null &&
+            !_updates.ready &&
+            !_updates.busy &&
+            !_updates.installing)
+          FilledButton(
+            onPressed: _updates.download,
+            child: Text(
+              'Download update (${(_updates.release!.size / 1048576).toStringAsFixed(1)} MB)',
+            ),
+          ),
+        if (_updates.ready) ...[
+          Text('Ready to install: ${_updates.readyVersion}'),
+          FilledButton(
+            onPressed: _updates.busy || _updates.installing ? null : _install,
+            child: Text(_updates.installing ? 'Installing…' : 'Install'),
+          ),
+          TextButton(
+            onPressed: _updates.busy || _updates.installing ? null : _discard,
+            child: const Text('Remove download'),
+          ),
+        ],
+        const SizedBox(height: 12),
+        const Text(
+          'Downloads stay in Iroh SSH. Installation requires your confirmation in Android.',
         ),
-      const Text(
-        'Updates open in your browser. Keep the same APK architecture and scanner variant when downloading.',
-      ),
-    ],
+      ],
+    ),
   );
 }
 
 /// Checks once per app launch without blocking startup or interrupting typing.
 class UpdateNotice extends StatefulWidget {
-  const UpdateNotice({super.key, required this.child, this.checker});
+  const UpdateNotice({
+    super.key,
+    required this.child,
+    this.checker,
+    this.controller,
+  });
   final UpdateChecker? checker;
+  final UpdateController? controller;
   final Widget child;
 
   @override
@@ -145,28 +238,33 @@ class _UpdateNoticeState extends State<UpdateNotice> {
 
   Future<void> _check() async {
     try {
-      if (!await (widget.checker ?? UpdateChecker.instance).isEnabled()) return;
-      final release = await (widget.checker ?? UpdateChecker.instance).check();
-      // A user may have switched checks off while the request was in flight.
-      if (release == null ||
-          !mounted ||
-          !await (widget.checker ?? UpdateChecker.instance).isEnabled()) {
+      final updates = widget.controller ?? UpdateController.instance;
+      await updates.refresh();
+      if (!mounted) return;
+      if (updates.message?.startsWith('Updated to ') == true) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(updates.message!)));
+      }
+      final checker = widget.checker ?? UpdateChecker.instance;
+      if (!await checker.isEnabled() || updates.ready || updates.installing) {
         return;
       }
+      final release = await checker.check();
+      if (release == null || !mounted || !await checker.isEnabled()) return;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Iroh SSH update available: $release'),
+          content: Text('Iroh SSH update available: ${release.tag}'),
           duration: const Duration(seconds: 10),
           action: SnackBarAction(
-            label: 'View release',
-            onPressed: () => openUpdateRelease(context),
+            label: 'Update',
+            onPressed: () => openUpdates(context, release: release),
           ),
         ),
       );
     } catch (_) {
-      // Offline/rate-limited startup checks must not disrupt a session.
-      // The manual check in Settings gives visible error feedback.
+      // Offline/rate-limited automatic checks must not disrupt a session.
     }
   }
 

@@ -52,21 +52,44 @@ keep the same APK architecture: Flutter gives per-ABI APKs different version-cod
 offsets, so switching back to a universal APK can be treated as a downgrade.
 All APKs in a release use the same version name and signing configuration.
 
-## Update checks
+## In-app updates
 
 On Android, **Settings → Updates** has an automatic-check toggle and **Check now**.
 Automatic checks contact GitHub's latest stable release API once at app startup;
-a newer version shows a non-blocking notice. Checks do not download or install APKs.
-**View release** opens the GitHub release page in your browser. Keep the same
-architecture and scanner variant when updating (see the APK table above).
+a newer version shows a non-blocking notice. **Update** opens the in-app updater.
+Checks never download or install anything automatically.
+
+**Download update** downloads the APK into private app storage with progress,
+cancellation and retry. The updater preserves the installed scanner variant and
+universal/per-ABI packaging using metadata embedded in the signed APK. It requires
+GitHub's SHA-256 digest and checks the APK's size, package name, version, signing
+certificate and native architectures before offering **Install**. Installation
+revalidates the file and rejects older or same-version-code APKs.
+
+**Install** warns that updating disconnects active terminals. Android performs
+the installation after user confirmation. On Android 8+, first allow installation
+from Iroh SSH in the system screen, return to the app and tap **Install** again.
+Cancelling installation keeps the verified download available for retry. The
+installed version is checked when the app next opens; an installer launch alone
+is never reported as a successful update. Saved connections and settings remain.
+A complete verified download survives app restarts while its cache file exists;
+interrupted downloads can be retried from the beginning. Downloads are not a
+separate background service, so Android may stop them if it kills the app.
 
 The default is **off** when Android reports Obtainium (`dev.imranr.obtainium` or
 `dev.imranr.obtainium.fdroid`) as the installer, and **on** otherwise, including
 when the installer is unknown. Merely tracking an app in Obtainium, or using an
 external installer through Obtainium, may not identify it as an Obtainium install.
-An explicit toggle choice is saved and overrides installer detection. Manual
-checks work even when automatic checks are off. Failed automatic checks are
-silent; manual checks report an error and can be retried.
+An explicit toggle choice overrides installer detection. The effective setting
+is saved before a self-update, since installing from Iroh SSH can change Android's
+installer record. Manual checks work even when automatic checks are off.
+
+The Build APK workflow records the scanner with
+`--dart-define=UPDATE_SCANNER=fdroid` or `mlkit`; packaging is recorded from
+Flutter's `--split-per-abi` flag. Local builds default to `fdroid`. If manually
+substituting the ML Kit scanner source, pass `--dart-define=UPDATE_SCANNER=mlkit`.
+Only APKs with matching metadata and signing certificates can be installed by
+this updater; it does not switch signing keys or release variants.
 
 ## Usage
 
