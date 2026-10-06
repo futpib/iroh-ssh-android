@@ -83,7 +83,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   Future<void> _persistLastConnectionType(ConnectionType type) async {
     final settings = await SettingsStorage.instance.load();
-    await SettingsStorage.instance.save(AppSettings(
+    await SettingsStorage.instance.save(settings.copyWith(
       useDefaultRelays: settings.useDefaultRelays,
       customRelayUrls: settings.customRelayUrls,
       maxRemoteNatTraversalAddresses: settings.maxRemoteNatTraversalAddresses,

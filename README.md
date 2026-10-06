@@ -52,6 +52,22 @@ keep the same APK architecture: Flutter gives per-ABI APKs different version-cod
 offsets, so switching back to a universal APK can be treated as a downgrade.
 All APKs in a release use the same version name and signing configuration.
 
+## Update checks
+
+On Android, **Settings → Updates** has an automatic-check toggle and **Check now**.
+Automatic checks contact GitHub's latest stable release API once at app startup;
+a newer version shows a non-blocking notice. Checks do not download or install APKs.
+**View release** opens the GitHub release page in your browser. Keep the same
+architecture and scanner variant when updating (see the APK table above).
+
+The default is **off** when Android reports Obtainium (`dev.imranr.obtainium` or
+`dev.imranr.obtainium.fdroid`) as the installer, and **on** otherwise, including
+when the installer is unknown. Merely tracking an app in Obtainium, or using an
+external installer through Obtainium, may not identify it as an Obtainium install.
+An explicit toggle choice is saved and overrides installer detection. Manual
+checks work even when automatic checks are off. Failed automatic checks are
+silent; manual checks report an error and can be retried.
+
 ## Usage
 
 ### iroh P2P connection

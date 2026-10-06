@@ -10,6 +10,7 @@ import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/widgets/network_settings_editor.dart';
+import 'package:iroh_ssh_app/widgets/update_settings.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -38,7 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: Platform.isAndroid ? 4 : 3, vsync: this);
     _loadKeys();
     _loadSettings();
   }
@@ -353,10 +354,12 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
 
   Future<void> _saveRelaySettings() async {
-    await SettingsStorage.instance.save(AppSettings(
+    final settings = await SettingsStorage.instance.load();
+    await SettingsStorage.instance.save(settings.copyWith(
       useDefaultRelays: _useDefaultRelays,
       customRelayUrls: _customRelayUrls,
       maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
+      clearMaxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses == null,
       terminalFontSize: _terminalFontSize,
       terminalTheme: _terminalTheme,
       barPosition: _barPosition,
@@ -364,10 +367,12 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
 
   Future<void> _saveTerminalSettings() async {
-    await SettingsStorage.instance.save(AppSettings(
+    final settings = await SettingsStorage.instance.load();
+    await SettingsStorage.instance.save(settings.copyWith(
       useDefaultRelays: _useDefaultRelays,
       customRelayUrls: _customRelayUrls,
       maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
+      clearMaxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses == null,
       terminalFontSize: _terminalFontSize,
       terminalTheme: _terminalTheme,
       barPosition: _barPosition,
@@ -522,10 +527,11 @@ class _SettingsScreenState extends State<SettingsScreen>
         title: const Text('Settings'),
         bottom: TabBar(
           controller: _tabController,
-          tabs: const [
+          tabs: [
             Tab(text: 'Keys'),
             Tab(text: 'Network'),
             Tab(text: 'Terminal'),
+            if (Platform.isAndroid) const Tab(text: 'Updates'),
           ],
         ),
       ),
@@ -535,6 +541,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           _buildKeysTab(),
           _buildRelaysTab(),
           _buildTerminalTab(),
+          if (Platform.isAndroid) const UpdateSettings(),
         ],
       ),
       floatingActionButton: ListenableBuilder(

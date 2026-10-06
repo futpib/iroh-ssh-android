@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 class AppSettings {
+  /// Null uses the installer-based default; a user choice always wins.
+  final bool? automaticUpdateChecks;
   final bool useDefaultRelays;
   final List<String> customRelayUrls;
   final int? maxRemoteNatTraversalAddresses;
@@ -15,6 +17,7 @@ class AppSettings {
   final String? lastConnectionType;
 
   AppSettings({
+    this.automaticUpdateChecks,
     this.useDefaultRelays = true,
     this.customRelayUrls = const [],
     this.maxRemoteNatTraversalAddresses,
@@ -25,18 +28,44 @@ class AppSettings {
     this.lastConnectionType,
   });
 
+  AppSettings copyWith({
+    bool? automaticUpdateChecks,
+    bool? useDefaultRelays,
+    List<String>? customRelayUrls,
+    int? maxRemoteNatTraversalAddresses,
+    bool clearMaxRemoteNatTraversalAddresses = false,
+    double? terminalFontSize,
+    String? terminalTheme,
+    String? barPosition,
+    String? tabViewStyle,
+    String? lastConnectionType,
+  }) => AppSettings(
+    automaticUpdateChecks: automaticUpdateChecks ?? this.automaticUpdateChecks,
+    useDefaultRelays: useDefaultRelays ?? this.useDefaultRelays,
+    customRelayUrls: customRelayUrls ?? this.customRelayUrls,
+    maxRemoteNatTraversalAddresses: clearMaxRemoteNatTraversalAddresses
+        ? null
+        : maxRemoteNatTraversalAddresses ?? this.maxRemoteNatTraversalAddresses,
+    terminalFontSize: terminalFontSize ?? this.terminalFontSize,
+    terminalTheme: terminalTheme ?? this.terminalTheme,
+    barPosition: barPosition ?? this.barPosition,
+    tabViewStyle: tabViewStyle ?? this.tabViewStyle,
+    lastConnectionType: lastConnectionType ?? this.lastConnectionType,
+  );
+
   Map<String, dynamic> toJson() => {
-        'useDefaultRelays': useDefaultRelays,
-        'customRelayUrls': customRelayUrls,
-        if (maxRemoteNatTraversalAddresses != null)
-          'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
-        'terminalFontSize': terminalFontSize,
-        'terminalTheme': terminalTheme,
-        'barPosition': barPosition,
-        'tabViewStyle': tabViewStyle,
-        if (lastConnectionType != null)
-          'lastConnectionType': lastConnectionType,
-      };
+    if (automaticUpdateChecks != null)
+      'automaticUpdateChecks': automaticUpdateChecks,
+    'useDefaultRelays': useDefaultRelays,
+    'customRelayUrls': customRelayUrls,
+    if (maxRemoteNatTraversalAddresses != null)
+      'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
+    'terminalFontSize': terminalFontSize,
+    'terminalTheme': terminalTheme,
+    'barPosition': barPosition,
+    'tabViewStyle': tabViewStyle,
+    if (lastConnectionType != null) 'lastConnectionType': lastConnectionType,
+  };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final maxNat = json['maxRemoteNatTraversalAddresses'] as int?;
@@ -50,6 +79,7 @@ class AppSettings {
     // Backwards compat: migrate old relayUrls/extraRelayUrls
     if (json.containsKey('useDefaultRelays')) {
       return AppSettings(
+        automaticUpdateChecks: json['automaticUpdateChecks'] as bool?,
         useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
         customRelayUrls:
             (json['customRelayUrls'] as List?)?.cast<String>() ?? [],
@@ -61,12 +91,12 @@ class AppSettings {
         lastConnectionType: lastConnectionType,
       );
     }
-    final oldRelayUrls =
-        (json['relayUrls'] as List?)?.cast<String>() ?? [];
+    final oldRelayUrls = (json['relayUrls'] as List?)?.cast<String>() ?? [];
     final oldExtraRelayUrls =
         (json['extraRelayUrls'] as List?)?.cast<String>() ?? [];
     if (oldRelayUrls.isNotEmpty) {
       return AppSettings(
+        automaticUpdateChecks: json['automaticUpdateChecks'] as bool?,
         useDefaultRelays: false,
         customRelayUrls: oldRelayUrls,
         maxRemoteNatTraversalAddresses: maxNat,
@@ -78,6 +108,7 @@ class AppSettings {
       );
     }
     return AppSettings(
+      automaticUpdateChecks: json['automaticUpdateChecks'] as bool?,
       useDefaultRelays: true,
       customRelayUrls: oldExtraRelayUrls,
       maxRemoteNatTraversalAddresses: maxNat,
@@ -116,8 +147,8 @@ class SettingsStorage {
   }
 
   Future<void> save(AppSettings settings) async {
-    _cache = settings;
     final f = await _file;
     await f.writeAsString(jsonEncode(settings.toJson()));
+    _cache = settings;
   }
 }

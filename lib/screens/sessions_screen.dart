@@ -464,7 +464,7 @@ class _SessionsScreenState extends State<SessionsScreen>
 
   Future<void> _persistTabViewStyle() async {
     final settings = await SettingsStorage.instance.load();
-    await SettingsStorage.instance.save(AppSettings(
+    await SettingsStorage.instance.save(settings.copyWith(
       useDefaultRelays: settings.useDefaultRelays,
       customRelayUrls: settings.customRelayUrls,
       maxRemoteNatTraversalAddresses: settings.maxRemoteNatTraversalAddresses,

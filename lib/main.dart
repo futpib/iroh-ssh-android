@@ -8,6 +8,7 @@ import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/src/rust/frb_generated.dart';
 import 'package:iroh_ssh_app/screens/connect_screen.dart';
 import 'package:iroh_ssh_app/screens/sessions_screen.dart';
+import 'package:iroh_ssh_app/widgets/update_settings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -93,6 +94,10 @@ class _IrohSshAppState extends State<IrohSshApp> {
     }
   }
 
+  Widget _home() => _existingSessions != null && _existingSessions!.isNotEmpty
+      ? SessionsScreen(existingSessions: _existingSessions!)
+      : const ConnectScreen();
+
   @override
   Widget build(BuildContext context) {
     if (!_checked) {
@@ -117,9 +122,9 @@ class _IrohSshAppState extends State<IrohSshApp> {
         useMaterial3: true,
         brightness: Brightness.dark,
       ),
-      home: _existingSessions != null && _existingSessions!.isNotEmpty
-          ? SessionsScreen(existingSessions: _existingSessions!)
-          : const ConnectScreen(),
+      home: Platform.isAndroid
+          ? UpdateNotice(child: _home())
+          : _home(),
     );
   }
 }
