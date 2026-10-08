@@ -52,6 +52,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   final _repaintBoundaryKey = GlobalKey();
   late FocusNode _focusNode;
   final _input = InputProcessor();
+  final _terminalController = TerminalController();
   double? _terminalHeight;
   late double _currentFontSize;
   double _baseScaleFontSize = 0;
@@ -74,6 +75,16 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   Timer? _scrollCorrectionDebounce;
   int _lastCursorAbsY = -1;
   bool _glideTyping = false;
+
+  void _onSelectionChanged() {
+    if (_terminalController.selection == null) return;
+    // A long press has won the gesture. Stop our raw-pointer scrolling and
+    // fling, including the wheel packets otherwise sent to tmux/vim.
+    _flingController?.stop();
+    _scrollPointerId = null;
+    _velocityTracker = null;
+    _lastScrollPointerY = null;
+  }
 
   void requestFocus() {
     _focusNode.requestFocus();
@@ -102,6 +113,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   @override
   void initState() {
     super.initState();
+    _terminalController.addListener(_onSelectionChanged);
     _currentFontSize = widget.fontSize;
     _focusNode = widget.focusNode ?? FocusNode();
     _flingController = AnimationController.unbounded(vsync: this);
@@ -137,7 +149,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   void _onTerminalChange() {
     if (!_keyboardOpen) return;
     if (_terminalHeight == null) return;
-    if (_userTouching) return;
+    if (_userTouching || _terminalController.selection != null) return;
 
     final viewHeight = widget.terminal.viewHeight;
     if (viewHeight <= 0) return;
@@ -166,7 +178,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!_keyboardOpen) return;
-      if (_userTouching) return;
+      if (_userTouching || _terminalController.selection != null) return;
       if (!_scrollController.hasClients) return;
       final viewHeight = widget.terminal.viewHeight;
       if (viewHeight <= 0) return;
@@ -196,6 +208,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   void didUpdateWidget(TerminalPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.terminal != oldWidget.terminal) {
+      _terminalController.clearSelection();
       oldWidget.terminal.removeListener(_onTerminalChange);
       widget.terminal.addListener(_onTerminalChange);
     }
@@ -212,6 +225,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
 
   @override
   void dispose() {
+    _terminalController.dispose();
     _repeatTimer?.cancel();
     _scrollCorrectionDebounce?.cancel();
     _flingController?.dispose();
@@ -609,6 +623,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                     key: _repaintBoundaryKey,
                     child: TerminalView(
                     widget.terminal,
+                    controller: _terminalController,
                     focusNode: _focusNode,
                     autofocus: widget.autofocus,
                     autoResize: !keyboardOpen,

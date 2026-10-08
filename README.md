@@ -110,6 +110,15 @@ The app will establish a peer-to-peer tunnel and open an interactive terminal se
 
 Select the **Local** tab and tap **Open Shell** to start a local terminal session on the device.
 
+## Selecting terminal text
+
+Long press or double tap a word, then drag the selection handles to adjust it.
+The floating menu offers **Copy**, **Paste**, and **Select All** (including
+scrollback). Drag a handle near the top or bottom edge to extend the selection
+through scrollback. Selecting text pauses touch scrolling and cursor-following;
+selection gestures do not send wheel input to tmux or vim. Tap elsewhere to
+clear the selection and resume ordinary scrolling.
+
 ## Building
 
 Prerequisites:
