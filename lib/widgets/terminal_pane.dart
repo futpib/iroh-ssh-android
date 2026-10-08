@@ -475,7 +475,8 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
     final wasKeyboardOpen = _keyboardOpen;
     _keyboardOpen = keyboardOpen;
     if (keyboardOpen) {
-      if (!wasKeyboardOpen && _scrollController.hasClients) {
+      if (!wasKeyboardOpen && _scrollController.hasClients &&
+          _terminalController.selection == null) {
         _scrollController.jumpTo(0);
       }
       _scheduleScrollCorrection();

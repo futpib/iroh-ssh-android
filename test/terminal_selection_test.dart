@@ -107,4 +107,38 @@ void main() {
     expect(view.scrollController!.offset, 0);
     expect(terminal.buffer.getText(view.controller!.selection!), 'line');
   });
+  testWidgets('opening the keyboard keeps the selected text visible', (
+    tester,
+  ) async {
+    final terminal = Terminal();
+    Widget app(double inset) => MaterialApp(
+      home: MediaQuery(
+        data: MediaQueryData(
+          size: const Size(800, 600),
+          viewInsets: EdgeInsets.only(bottom: inset),
+        ),
+        child: Scaffold(
+          resizeToAvoidBottomInset: false,
+          body: TerminalPane(terminal: terminal),
+        ),
+      ),
+    );
+    await tester.pumpWidget(app(0));
+    terminal.write('hello world');
+    await tester.pumpAndSettle();
+    final view = tester.widget<TerminalView>(find.byType(TerminalView));
+    view.controller!.setSelection(
+      terminal.buffer.createAnchor(0, 0),
+      terminal.buffer.createAnchor(5, 0),
+    );
+    tester
+        .state<TerminalViewState>(find.byType(TerminalView))
+        .showSelectionToolbar();
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(app(250));
+    await tester.pumpAndSettle();
+    expect(view.scrollController!.offset, 0);
+    expect(find.text('Copy'), findsOneWidget);
+    expect(terminal.buffer.getText(view.controller!.selection!), 'hello');
+  });
 }
