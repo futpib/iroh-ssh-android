@@ -119,6 +119,10 @@ through scrollback. Selecting text pauses touch scrolling and cursor-following;
 selection gestures do not send wheel input to tmux or vim. Tap elsewhere to
 clear the selection and resume ordinary scrolling.
 
+In tmux, enter copy mode to bring older output onto the screen before selecting
+it. With tmux mouse mode enabled, touch scrolling enters copy mode. **Select All**
+copies the terminal buffer currently exposed by tmux, not its hidden history.
+
 ## Building
 
 Prerequisites:
