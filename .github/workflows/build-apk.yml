@@ -79,6 +79,13 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}
           name: ${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}
-          body: Built from ${{ github.sha }}.
+          body: |
+            **If unsure, download [app-release.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.name }}+${{ steps.version.outputs.code }}/app-release.apk).**
+
+            This universal APK includes all supported CPU architectures, so you do not need to choose one for a new install.
+
+            **Updating an existing installation?** Keep the same APK filename (architecture and scanner variant) you installed previously.
+
+            Built from ${{ github.sha }}.
           fail_on_unmatched_files: true
           files: ${{ runner.temp }}/release-apks/*.apk
