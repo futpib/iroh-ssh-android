@@ -1,0 +1,32 @@
+name: Copy signing credentials to zondd
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Copy signing credentials
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.ZONDD_SECRETS_TOKEN }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?Missing ZONDD_SECRETS_TOKEN}"
+          : "${KEYSTORE_BASE64:?Missing KEYSTORE_BASE64}"
+
+          printf '%s' "$KEYSTORE_BASE64" |
+            gh secret set KEYSTORE_BASE64 --repo futpib/zondd
+          printf '%s' 'android' |
+            gh secret set KEYSTORE_PASSWORD --repo futpib/zondd
+          printf '%s' 'release' |
+            gh secret set KEY_ALIAS --repo futpib/zondd
+          printf '%s' 'android' |
+            gh secret set KEY_PASSWORD --repo futpib/zondd
+
+          echo "Signing credentials copied to futpib/zondd."
