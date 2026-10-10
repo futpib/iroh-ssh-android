@@ -991,8 +991,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "452edd97ecaea4f1e1b500c57fe9d215e5db4603"
-      resolved-ref: "452edd97ecaea4f1e1b500c57fe9d215e5db4603"
+      ref: "3728ad2808f983e58b8adc0dfc35d4f41fc79a9f"
+      resolved-ref: "3728ad2808f983e58b8adc0dfc35d4f41fc79a9f"
       url: "https://github.com/futpib/xterm.dart"
     source: git
     version: "4.0.0"
