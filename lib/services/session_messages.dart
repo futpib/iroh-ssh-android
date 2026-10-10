@@ -5,6 +5,7 @@ import 'package:iroh_ssh_app/services/known_hosts.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/fs_entry.dart';
 import 'package:iroh_ssh_app/models/tab_kind.dart';
+import 'package:iroh_ssh_app/services/open_keychain.dart';
 
 // ---------------------------------------------------------------------------
 // UI → Service messages
@@ -49,6 +50,7 @@ class ConnectCommand extends ServiceCommand {
   final String username;
   final String displayName;
   final List<String> keyNames;
+  final List<OpenKeychainKey> openKeychainKeys;
   final List<String> relayUrls;
   final List<String> extraRelayUrls;
   final String? host;
@@ -61,6 +63,7 @@ class ConnectCommand extends ServiceCommand {
     required this.username,
     required this.displayName,
     required this.keyNames,
+    this.openKeychainKeys = const [],
     required this.relayUrls,
     required this.extraRelayUrls,
     this.host,
@@ -76,6 +79,7 @@ class ConnectCommand extends ServiceCommand {
         'username': username,
         'displayName': displayName,
         'keyNames': keyNames,
+        'openKeychainKeys': openKeychainKeys.map((key) => key.toJson()).toList(),
         'relayUrls': relayUrls,
         'extraRelayUrls': extraRelayUrls,
         if (host != null) 'host': host,
@@ -89,6 +93,11 @@ class ConnectCommand extends ServiceCommand {
         username: json['username'] as String,
         displayName: json['displayName'] as String,
         keyNames: (json['keyNames'] as List).cast<String>(),
+        openKeychainKeys: (json['openKeychainKeys'] as List<dynamic>? ?? const [])
+            .map((value) => OpenKeychainKey.fromJson(
+                  (value as Map<dynamic, dynamic>).cast<String, dynamic>(),
+                ))
+            .toList(),
         relayUrls: (json['relayUrls'] as List).cast<String>(),
         extraRelayUrls: (json['extraRelayUrls'] as List).cast<String>(),
         host: json['host'] as String?,

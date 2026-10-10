@@ -27,7 +27,7 @@ The app is built with Flutter and bridges to a Rust core ([iroh-ssh](https://git
 - **File manager** — browse SFTP or app-owned local files; downloads publish to Android Downloads. If publication is unavailable or fails, the copy remains under **Local → Files → downloads**, at the location shown in the notification.
 - **Multiple sessions** — manage several concurrent sessions in tabs
 - **Terminal emulator** — full xterm-compatible terminal with configurable font size and colour theme
-- **SSH key management** — generate Ed25519 keys, import existing keys (PEM), copy/export public keys, and export private keys (protected by biometric authentication on Android)
+- **SSH key management** — generate or import local keys, or use authentication-capable keys held by an OpenKeychain-compatible Android provider without copying private key material into the app
 - **QR code scanning** — on Android, scan a connection target from a QR code; import a private key from a QR code on all platforms
 - **Saved connections** — quickly reconnect to previously used hosts
 - **Background sessions** — on Android, sessions run in a foreground service so they survive app backgrounding
@@ -109,6 +109,13 @@ The app will establish a peer-to-peer tunnel and open an interactive terminal se
 Open **Settings → Keys** to generate or import an identity.
 Stored keys are offered when the server accepts key authentication; the app
 still shows password or other prompts selected during SSH authentication.
+
+On Android, **Settings → Keys → OpenKeychain** can add an authentication-capable
+key from any installed provider of the OpenKeychain SSH authentication API. The
+provider retains the private key and handles its own unlock, biometric, or
+security-token confirmation when Iroh SSH needs a signature. Keep Iroh SSH in
+the foreground when the provider requires interaction. Only the provider name,
+key reference, description, and SSH public key are saved by Iroh SSH.
 
 ### Local shell
 

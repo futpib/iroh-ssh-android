@@ -64,7 +64,7 @@ class BackgroundSession {
   final String displayName;
   final String username;
   int port;
-  final List<SSHKeyPair> identities;
+  final List<SSHIdentity> identities;
   final ConnectionType connectionType;
   final TabKind kind;
   final DownloadStorage downloadStorage;

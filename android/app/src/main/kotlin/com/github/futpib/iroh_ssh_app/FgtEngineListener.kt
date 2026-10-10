@@ -20,6 +20,7 @@ class FgtEngineListener(context: Context) : FlutterForegroundTaskLifecycleListen
         val messenger = flutterEngine?.dartExecutor?.binaryMessenger ?: return
         MediaStoreSaver.register(messenger, appContext)
         TransferNotificationManager.register(messenger, appContext)
+        OpenKeychainBridge.register(messenger, appContext)
     }
 
     override fun onTaskStart(starter: FlutterForegroundTaskStarter) {}

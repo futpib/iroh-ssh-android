@@ -33,6 +33,7 @@ void main() {
       await key('host1');
       await key('host2');
       await key('identity');
+      await key('rejected');
       final user = (await Process.run('id', ['-un'])).stdout.toString().trim();
       final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final port = socket.port;
@@ -86,13 +87,14 @@ LogLevel ERROR
         required bool approve,
         required bool expectPrompt,
         bool changed = false,
+        List<SSHIdentity>? connectionIdentities,
       }) async {
         final client = BackgroundSession(
           sessionId: 'wire',
           displayName: 'test',
           username: user,
           port: port,
-          identities: identities,
+          identities: connectionIdentities ?? identities,
           connectionType: ConnectionType.ssh,
           sshHost: '127.0.0.1',
           sshPort: port,
@@ -141,6 +143,40 @@ LogLevel ERROR
       await connect(approve: false, expectPrompt: true);
       await connect(approve: true, expectPrompt: true);
       await connect(approve: true, expectPrompt: false);
+
+      final rejected = SSHKeyPair.fromPem(
+        await File('${temp.path}/rejected').readAsString(),
+      ).single;
+      var rejectedSignatures = 0;
+      var acceptedSignatures = 0;
+      final externalIdentities = [
+        SSHIdentity.custom(
+          type: rejected.type,
+          publicKey: SSHRawHostKey(rejected.toPublicKey().encode()),
+          shouldProbe: true,
+          signer: (challenge) async {
+            rejectedSignatures++;
+            return SSHRawSignature(rejected.sign(challenge).encode());
+          },
+        ),
+        SSHIdentity.custom(
+          type: identities.single.type,
+          publicKey: SSHRawHostKey(identities.single.toPublicKey().encode()),
+          shouldProbe: true,
+          signer: (challenge) async {
+            acceptedSignatures++;
+            return SSHRawSignature(identities.single.sign(challenge).encode());
+          },
+        ),
+      ];
+      await connect(
+        approve: true,
+        expectPrompt: false,
+        connectionIdentities: externalIdentities,
+      );
+      expect(rejectedSignatures, 0);
+      expect(acceptedSignatures, 1);
+
       server!.kill();
       await server!.exitCode;
       await start('host2');

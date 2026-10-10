@@ -10,6 +10,7 @@ import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/connection_storage.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/open_keychain.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/session_service.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
@@ -235,6 +236,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
     try {
       final keys = await KeyStorage.instance.listKeys();
+      final openKeychainKeys = Platform.isAndroid
+          ? await OpenKeychainStorage.instance.listKeys()
+          : const <OpenKeychainKey>[];
       final globalSettings = await SettingsStorage.instance.load();
 
       final effectiveUseDefaultRelays = overrideRelays
@@ -305,6 +309,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
             username: username,
             displayName: displayName,
             keyNames: keys.map((k) => k.name).toList(),
+            openKeychainKeys: openKeychainKeys,
             relayUrls: relayUrls,
             extraRelayUrls: extraRelayUrls,
             host: sshHost,

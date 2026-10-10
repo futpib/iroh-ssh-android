@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
@@ -111,10 +112,12 @@ class SshSessionService extends TaskHandler {
   Future<void> _handleConnectIroh(String sessionId, ConnectCommand command) async {
     final keys = await KeyStorage.instance.listKeys();
     final requestedKeyNames = command.keyNames.toSet();
-    final identities = keys
-        .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
-        .map((k) => k.keyPair)
-        .toList();
+    final identities = <SSHIdentity>[
+      ...keys
+          .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
+          .map((k) => k.keyPair),
+      ...command.openKeychainKeys.map((key) => key.createIdentity()),
+    ];
 
     final port = await connectIroh(
       endpointId: command.endpointId!,
@@ -141,10 +144,12 @@ class SshSessionService extends TaskHandler {
   Future<void> _handleConnectSsh(String sessionId, ConnectCommand command) async {
     final keys = await KeyStorage.instance.listKeys();
     final requestedKeyNames = command.keyNames.toSet();
-    final identities = keys
-        .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
-        .map((k) => k.keyPair)
-        .toList();
+    final identities = <SSHIdentity>[
+      ...keys
+          .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
+          .map((k) => k.keyPair),
+      ...command.openKeychainKeys.map((key) => key.createIdentity()),
+    ];
 
     final session = BackgroundSession(
       sessionId: sessionId,

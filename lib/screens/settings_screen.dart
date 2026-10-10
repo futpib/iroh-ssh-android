@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/open_keychain.dart';
 import 'package:iroh_ssh_app/services/settings_storage.dart';
 import 'package:iroh_ssh_app/widgets/network_settings_editor.dart';
 import 'package:iroh_ssh_app/widgets/update_settings.dart';
@@ -24,6 +25,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   late final TabController _tabController;
 
   List<StoredKey>? _keys;
+  List<OpenKeychainKey>? _openKeychainKeys;
   bool _keysLoading = true;
 
   bool _useDefaultRelays = true;
@@ -56,13 +58,161 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   Future<void> _loadKeys() async {
     setState(() => _keysLoading = true);
-    final keys = await KeyStorage.instance.listKeys();
+    final values = await Future.wait([
+      KeyStorage.instance.listKeys(),
+      if (Platform.isAndroid)
+        OpenKeychainStorage.instance.listKeys()
+      else
+        Future.value(<OpenKeychainKey>[]),
+    ]);
+    final keys = values[0] as List<StoredKey>;
+    final openKeychainKeys = values[1] as List<OpenKeychainKey>;
     if (mounted) {
       setState(() {
         _keys = keys;
+        _openKeychainKeys = openKeychainKeys;
         _keysLoading = false;
       });
     }
+  }
+
+  Future<void> _importOpenKeychainKey() async {
+    try {
+      final providers = await OpenKeychainClient.instance.listProviders();
+      if (!mounted) return;
+      if (providers.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No OpenKeychain provider is installed'),
+          ),
+        );
+        return;
+      }
+
+      final provider = providers.length == 1
+          ? providers.single
+          : await showDialog<OpenKeychainProvider>(
+              context: context,
+              builder: (ctx) => SimpleDialog(
+                title: const Text('Choose key provider'),
+                children: [
+                  for (final candidate in providers)
+                    SimpleDialogOption(
+                      onPressed: () => Navigator.pop(ctx, candidate),
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.security),
+                        title: Text(candidate.label),
+                        subtitle: Text(candidate.packageName),
+                      ),
+                    ),
+                ],
+              ),
+            );
+      if (provider == null) return;
+
+      final selection = await OpenKeychainClient.instance.selectKey(
+        provider.packageName,
+      );
+      final publicKey = await OpenKeychainClient.instance.getSshPublicKey(
+        providerPackage: provider.packageName,
+        keyId: selection.keyId,
+      );
+      final key = OpenKeychainKey(
+        providerPackage: provider.packageName,
+        providerLabel: provider.label,
+        keyId: selection.keyId,
+        description: selection.description,
+        publicKeyString: publicKey,
+      );
+      key.createIdentity();
+      await OpenKeychainStorage.instance.save(key);
+      await _loadKeys();
+      if (mounted) _showOpenKeychainPublicKeyDialog(key);
+    } on PlatformException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message ?? error.code)));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not add OpenKeychain key: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteOpenKeychainKey(OpenKeychainKey key) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove OpenKeychain key'),
+        content: Text(
+          'Remove "${key.description}" from Iroh SSH? The key remains in ${key.providerLabel}.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await OpenKeychainStorage.instance.delete(key.id);
+      await _loadKeys();
+    }
+  }
+
+  void _showOpenKeychainPublicKeyDialog(OpenKeychainKey key) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(key.description),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Signing is handled by ${key.providerLabel}; the private key never enters Iroh SSH.',
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Add this public key to your server’s authorized_keys file.',
+              ),
+              const SizedBox(height: 16),
+              SelectableText(
+                key.publicKeyString,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.copy, size: 18),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: key.publicKeyString));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Public key copied')),
+              );
+              Navigator.pop(ctx);
+            },
+            label: const Text('Copy public key'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _generateKey() async {
@@ -396,7 +546,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       return const Center(child: CircularProgressIndicator());
     }
     final keys = _keys ?? [];
-    if (keys.isEmpty) {
+    final openKeychainKeys = _openKeychainKeys ?? [];
+    if (keys.isEmpty && openKeychainKeys.isEmpty) {
       return ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -416,23 +567,27 @@ class _SettingsScreenState extends State<SettingsScreen>
               ],
             ),
           ),
-          Row(
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 12,
+            runSpacing: 12,
             children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _generateKey,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Generate'),
-                ),
+              FilledButton.icon(
+                onPressed: _generateKey,
+                icon: const Icon(Icons.add),
+                label: const Text('Generate'),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _importKey,
-                  icon: const Icon(Icons.file_download_outlined),
-                  label: const Text('Import'),
-                ),
+              OutlinedButton.icon(
+                onPressed: _importKey,
+                icon: const Icon(Icons.file_download_outlined),
+                label: const Text('Import'),
               ),
+              if (Platform.isAndroid)
+                OutlinedButton.icon(
+                  onPressed: _importOpenKeychainKey,
+                  icon: const Icon(Icons.security),
+                  label: const Text('OpenKeychain'),
+                ),
             ],
           ),
         ],
@@ -454,6 +609,12 @@ class _SettingsScreenState extends State<SettingsScreen>
               icon: const Icon(Icons.file_download_outlined),
               tooltip: 'Import key',
             ),
+            if (Platform.isAndroid)
+              IconButton(
+                onPressed: _importOpenKeychainKey,
+                icon: const Icon(Icons.security),
+                tooltip: 'Add from OpenKeychain',
+              ),
           ],
         ),
         for (final key in keys)
@@ -479,6 +640,32 @@ class _SettingsScreenState extends State<SettingsScreen>
                 ],
               ),
               onTap: () => _showPublicKeyDialog(key),
+            ),
+          ),
+        for (final key in openKeychainKeys)
+          Card(
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 8,
+              ),
+              leading: const Icon(Icons.security),
+              title: Text(key.description),
+              subtitle: Text(
+                '${key.providerLabel}\n${key.publicKeyString}',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+              ),
+              isThreeLine: true,
+              trailing: PopupMenuButton<String>(
+                tooltip: 'Key actions',
+                onSelected: (_) => _deleteOpenKeychainKey(key),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'remove', child: Text('Remove')),
+                ],
+              ),
+              onTap: () => _showOpenKeychainPublicKeyDialog(key),
             ),
           ),
       ],
