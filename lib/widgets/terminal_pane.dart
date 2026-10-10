@@ -50,6 +50,7 @@ class TerminalPane extends StatefulWidget {
 
 class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderStateMixin {
   final _repaintBoundaryKey = GlobalKey();
+  final _terminalViewKey = GlobalKey<TerminalViewState>();
   late FocusNode _focusNode;
   final _input = InputProcessor();
   final _terminalController = TerminalController();
@@ -252,6 +253,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
   }
 
   void _sendKey(TerminalKey key) {
+    _terminalViewKey.currentState?.resetInput();
     widget.terminal.keyInput(
       key,
       ctrl: ctrlActive,
@@ -295,6 +297,9 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
     ModifierState current,
     void Function(ModifierState) setter,
   ) {
+    if (current == ModifierState.off) {
+      _terminalViewKey.currentState?.resetInput();
+    }
     _input.cycleModifier(current, setter);
   }
 
@@ -341,6 +346,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
         setState(() => _cycleModifier(_input.shiftState, (s) => _input.shiftState = s));
       }),
       _modifierButton('PSWRD', _glideTyping ? ModifierState.off : ModifierState.locked, () {
+        _terminalViewKey.currentState?.resetInput();
         setState(() => _glideTyping = !_glideTyping);
       }),
       _repeatableToolbarButton('HOME', () => _sendKey(TerminalKey.home)),
@@ -624,6 +630,7 @@ class TerminalPaneState extends State<TerminalPane> with SingleTickerProviderSta
                     key: _repaintBoundaryKey,
                     child: TerminalView(
                     widget.terminal,
+                    key: _terminalViewKey,
                     controller: _terminalController,
                     focusNode: _focusNode,
                     autofocus: widget.autofocus,

@@ -41,7 +41,7 @@ dependencies:
   xterm:
     git:
       url: https://github.com/futpib/xterm.dart
-      ref: 3728ad2808f983e58b8adc0dfc35d4f41fc79a9f
+      ref: d96d89f0a8996d22464b541351ff4773b1fa827e
   dartssh2: ^4.1.0
   path_provider: ^2.1.6
   pinenacl: ^0.6.0

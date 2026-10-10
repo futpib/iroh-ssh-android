@@ -160,7 +160,11 @@ class InputProcessor {
       _rejectCommit = false;
       return null;
     }
+    // A committed newline (FUTO's Enter path) ends the editable terminal line.
+    // Keep only subsequent text so corrections cannot reach an earlier prompt.
     var text = committed.text;
+    final newline = text.lastIndexOf(RegExp(r'[\r\n]'));
+    if (newline >= 0) text = text.substring(newline + 1);
     if (text.length > maxRetainedLength) {
       final lastSpace = text.lastIndexOf(' ', text.length - 1);
       if (lastSpace > text.length - maxRetainedLength) {
