@@ -440,7 +440,7 @@ class FileManagerTabState extends State<FileManagerTab>
       return;
     }
     // Desktop: no foreground service — run it in-process to a chosen directory.
-    final dir = await FilePicker.platform.getDirectoryPath(
+    final dir = await FilePicker.getDirectoryPath(
       initialDirectory: (await getDownloadsDirectory())?.path,
     );
     if (dir == null) return;
@@ -455,9 +455,8 @@ class FileManagerTabState extends State<FileManagerTab>
   }
 
   Future<void> _upload() async {
-    final picked = await FilePicker.platform.pickFiles();
-    if (picked == null || picked.files.isEmpty) return;
-    final file = picked.files.first;
+    final file = await FilePicker.pickFile();
+    if (file == null) return;
     final localPath = file.path;
     if (localPath == null) {
       _toast('Could not access the selected file');

@@ -432,7 +432,7 @@ class TerminalTabState extends State<TerminalTab>
 
     final outputDir = directoryPickerOverride != null
         ? await directoryPickerOverride!()
-        : await FilePicker.platform.getDirectoryPath(
+        : await FilePicker.getDirectoryPath(
             initialDirectory: (await getDownloadsDirectory())?.path,
           );
 

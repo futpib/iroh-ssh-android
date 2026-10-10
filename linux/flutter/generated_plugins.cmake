@@ -11,6 +11,7 @@ list(APPEND FLUTTER_FFI_PLUGIN_LIST
   flutter_pty
   flutter_zxing
   iroh_ssh_proxy
+  jni
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

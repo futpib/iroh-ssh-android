@@ -320,12 +320,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                   icon: const Icon(Icons.file_open),
                   tooltip: 'Pick file',
                   onPressed: () async {
-                    final result = await FilePicker.platform.pickFiles(
-                      type: FileType.any,
-                      withData: true,
-                    );
-                    if (result != null && result.files.single.bytes != null) {
-                      controller.text = utf8.decode(result.files.single.bytes!);
+                    final file = await FilePicker.pickFile(type: FileType.any);
+                    if (file != null) {
+                      controller.text = utf8.decode(await file.readAsBytes());
                     }
                   },
                 ),

@@ -19,7 +19,8 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.11.0
+  sdk: ^3.13.0
+  flutter: ">=3.44.0"
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -33,7 +34,7 @@ dependencies:
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
+  cupertino_icons: ^2.0.0
   iroh_ssh_proxy:
     path: rust_builder
   flutter_rust_bridge: 2.11.1
@@ -41,18 +42,18 @@ dependencies:
     git:
       url: https://github.com/futpib/xterm.dart
       ref: 452edd97ecaea4f1e1b500c57fe9d215e5db4603
-  dartssh2: ^2.22.5
-  path_provider: ^2.1.5
+  dartssh2: ^4.1.0
+  path_provider: ^2.1.6
   pinenacl: ^0.6.0
-  flutter_foreground_task: ^9.2.0
-  mobile_scanner: ^7.2.0
-  flutter_zxing: ^2.2.1
-  local_auth: ^3.0.0
-  file_saver: ^0.3.1
-  file_picker: ^10.3.10
+  flutter_foreground_task: ^11.0.3
+  mobile_scanner: ^7.4.2
+  flutter_zxing: ^3.1.0
+  local_auth: ^3.0.2
+  file_saver: ^0.7.0
+  file_picker: ^13.1.0
   flutter_pty: ^0.4.2
   path: ^1.9.1
-  fluttertoast: ^9.0.0
+  fluttertoast: ^10.0.2
 
 dev_dependencies:
   flutter_test:
