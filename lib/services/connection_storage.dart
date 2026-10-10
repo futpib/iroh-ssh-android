@@ -11,7 +11,6 @@ class SavedConnection {
   final bool overrideRelays;
   final bool useDefaultRelays;
   final List<String> customRelayUrls;
-  final int? maxRemoteNatTraversalAddresses;
 
   SavedConnection({
     required this.target,
@@ -19,7 +18,6 @@ class SavedConnection {
     this.overrideRelays = false,
     this.useDefaultRelays = true,
     this.customRelayUrls = const [],
-    this.maxRemoteNatTraversalAddresses,
   });
 
   String get username {
@@ -68,12 +66,9 @@ class SavedConnection {
     'overrideRelays': overrideRelays,
     'useDefaultRelays': useDefaultRelays,
     'customRelayUrls': customRelayUrls,
-    if (maxRemoteNatTraversalAddresses != null)
-      'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
   };
 
   factory SavedConnection.fromJson(Map<String, dynamic> json) {
-    final maxNat = json['maxRemoteNatTraversalAddresses'] as int?;
     final connectionType = _parseConnectionType(
       json['connectionType'] as String?,
     );
@@ -86,7 +81,6 @@ class SavedConnection {
         useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
         customRelayUrls:
             (json['customRelayUrls'] as List?)?.cast<String>() ?? [],
-        maxRemoteNatTraversalAddresses: maxNat,
       );
     }
     // Backwards compat: migrate old relayUrls/extraRelayUrls
@@ -99,7 +93,6 @@ class SavedConnection {
         connectionType: connectionType,
         useDefaultRelays: false,
         customRelayUrls: oldRelayUrls,
-        maxRemoteNatTraversalAddresses: maxNat,
       );
     }
     return SavedConnection(
@@ -107,7 +100,6 @@ class SavedConnection {
       connectionType: connectionType,
       useDefaultRelays: true,
       customRelayUrls: oldExtraRelayUrls,
-      maxRemoteNatTraversalAddresses: maxNat,
     );
   }
 

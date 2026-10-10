@@ -9,7 +9,6 @@ class AppSettings {
   final bool? automaticUpdateChecks;
   final bool useDefaultRelays;
   final List<String> customRelayUrls;
-  final int? maxRemoteNatTraversalAddresses;
   final double terminalFontSize;
   final String terminalTheme;
   final String barPosition;
@@ -20,7 +19,6 @@ class AppSettings {
     this.automaticUpdateChecks,
     this.useDefaultRelays = true,
     this.customRelayUrls = const [],
-    this.maxRemoteNatTraversalAddresses,
     this.terminalFontSize = 14.0,
     this.terminalTheme = 'default',
     this.barPosition = 'bottom',
@@ -32,8 +30,6 @@ class AppSettings {
     bool? automaticUpdateChecks,
     bool? useDefaultRelays,
     List<String>? customRelayUrls,
-    int? maxRemoteNatTraversalAddresses,
-    bool clearMaxRemoteNatTraversalAddresses = false,
     double? terminalFontSize,
     String? terminalTheme,
     String? barPosition,
@@ -43,9 +39,6 @@ class AppSettings {
     automaticUpdateChecks: automaticUpdateChecks ?? this.automaticUpdateChecks,
     useDefaultRelays: useDefaultRelays ?? this.useDefaultRelays,
     customRelayUrls: customRelayUrls ?? this.customRelayUrls,
-    maxRemoteNatTraversalAddresses: clearMaxRemoteNatTraversalAddresses
-        ? null
-        : maxRemoteNatTraversalAddresses ?? this.maxRemoteNatTraversalAddresses,
     terminalFontSize: terminalFontSize ?? this.terminalFontSize,
     terminalTheme: terminalTheme ?? this.terminalTheme,
     barPosition: barPosition ?? this.barPosition,
@@ -58,8 +51,6 @@ class AppSettings {
       'automaticUpdateChecks': automaticUpdateChecks,
     'useDefaultRelays': useDefaultRelays,
     'customRelayUrls': customRelayUrls,
-    if (maxRemoteNatTraversalAddresses != null)
-      'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
     'terminalFontSize': terminalFontSize,
     'terminalTheme': terminalTheme,
     'barPosition': barPosition,
@@ -68,7 +59,6 @@ class AppSettings {
   };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
-    final maxNat = json['maxRemoteNatTraversalAddresses'] as int?;
     final terminalFontSize =
         (json['terminalFontSize'] as num?)?.toDouble() ?? 14.0;
     final terminalTheme = json['terminalTheme'] as String? ?? 'default';
@@ -83,7 +73,6 @@ class AppSettings {
         useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
         customRelayUrls:
             (json['customRelayUrls'] as List?)?.cast<String>() ?? [],
-        maxRemoteNatTraversalAddresses: maxNat,
         terminalFontSize: terminalFontSize,
         terminalTheme: terminalTheme,
         barPosition: barPosition,
@@ -99,7 +88,6 @@ class AppSettings {
         automaticUpdateChecks: json['automaticUpdateChecks'] as bool?,
         useDefaultRelays: false,
         customRelayUrls: oldRelayUrls,
-        maxRemoteNatTraversalAddresses: maxNat,
         terminalFontSize: terminalFontSize,
         terminalTheme: terminalTheme,
         barPosition: barPosition,
@@ -111,7 +99,6 @@ class AppSettings {
       automaticUpdateChecks: json['automaticUpdateChecks'] as bool?,
       useDefaultRelays: true,
       customRelayUrls: oldExtraRelayUrls,
-      maxRemoteNatTraversalAddresses: maxNat,
       terminalFontSize: terminalFontSize,
       terminalTheme: terminalTheme,
       barPosition: barPosition,

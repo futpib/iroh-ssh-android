@@ -51,7 +51,6 @@ class ConnectCommand extends ServiceCommand {
   final List<String> keyNames;
   final List<String> relayUrls;
   final List<String> extraRelayUrls;
-  final int? maxRemoteNatTraversalAddresses;
   final String? host;
   final int? sshPort;
 
@@ -64,7 +63,6 @@ class ConnectCommand extends ServiceCommand {
     required this.keyNames,
     required this.relayUrls,
     required this.extraRelayUrls,
-    this.maxRemoteNatTraversalAddresses,
     this.host,
     this.sshPort,
   });
@@ -80,8 +78,6 @@ class ConnectCommand extends ServiceCommand {
         'keyNames': keyNames,
         'relayUrls': relayUrls,
         'extraRelayUrls': extraRelayUrls,
-        if (maxRemoteNatTraversalAddresses != null)
-          'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
         if (host != null) 'host': host,
         if (sshPort != null) 'sshPort': sshPort,
       };
@@ -95,8 +91,6 @@ class ConnectCommand extends ServiceCommand {
         keyNames: (json['keyNames'] as List).cast<String>(),
         relayUrls: (json['relayUrls'] as List).cast<String>(),
         extraRelayUrls: (json['extraRelayUrls'] as List).cast<String>(),
-        maxRemoteNatTraversalAddresses:
-            json['maxRemoteNatTraversalAddresses'] as int?,
         host: json['host'] as String?,
         sshPort: json['sshPort'] as int?,
       );

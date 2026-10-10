@@ -120,7 +120,6 @@ class SshSessionService extends TaskHandler {
       endpointId: command.endpointId!,
       relayUrls: command.relayUrls,
       extraRelayUrls: command.extraRelayUrls,
-      maxRemoteNatTraversalAddresses: command.maxRemoteNatTraversalAddresses,
     );
 
     final session = BackgroundSession(
@@ -134,7 +133,6 @@ class SshSessionService extends TaskHandler {
       endpointId: command.endpointId,
       relayUrls: command.relayUrls,
       extraRelayUrls: command.extraRelayUrls,
-      maxRemoteNatTraversalAddresses: command.maxRemoteNatTraversalAddresses,
     );
 
     _startSession(sessionId, session, command);

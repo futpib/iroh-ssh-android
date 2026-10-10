@@ -28,7 +28,6 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   bool _useDefaultRelays = true;
   List<String> _customRelayUrls = [];
-  int? _maxRemoteNatTraversalAddresses;
   bool _relaysLoading = true;
 
   double _terminalFontSize = 14.0;
@@ -358,8 +357,6 @@ class _SettingsScreenState extends State<SettingsScreen>
       setState(() {
         _useDefaultRelays = settings.useDefaultRelays;
         _customRelayUrls = List.of(settings.customRelayUrls);
-        _maxRemoteNatTraversalAddresses =
-            settings.maxRemoteNatTraversalAddresses;
         _relaysLoading = false;
         _terminalFontSize = settings.terminalFontSize;
         _terminalTheme = settings.terminalTheme;
@@ -375,9 +372,6 @@ class _SettingsScreenState extends State<SettingsScreen>
       settings.copyWith(
         useDefaultRelays: _useDefaultRelays,
         customRelayUrls: _customRelayUrls,
-        maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
-        clearMaxRemoteNatTraversalAddresses:
-            _maxRemoteNatTraversalAddresses == null,
         terminalFontSize: _terminalFontSize,
         terminalTheme: _terminalTheme,
         barPosition: _barPosition,
@@ -391,9 +385,6 @@ class _SettingsScreenState extends State<SettingsScreen>
       settings.copyWith(
         useDefaultRelays: _useDefaultRelays,
         customRelayUrls: _customRelayUrls,
-        maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
-        clearMaxRemoteNatTraversalAddresses:
-            _maxRemoteNatTraversalAddresses == null,
         terminalFontSize: _terminalFontSize,
         terminalTheme: _terminalTheme,
         barPosition: _barPosition,
@@ -507,14 +498,11 @@ class _SettingsScreenState extends State<SettingsScreen>
         value: NetworkSettings(
           useDefaultRelays: _useDefaultRelays,
           customRelayUrls: _customRelayUrls,
-          maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
         ),
         onChanged: (settings) {
           setState(() {
             _useDefaultRelays = settings.useDefaultRelays;
             _customRelayUrls = settings.customRelayUrls;
-            _maxRemoteNatTraversalAddresses =
-                settings.maxRemoteNatTraversalAddresses;
           });
           _saveRelaySettings();
         },

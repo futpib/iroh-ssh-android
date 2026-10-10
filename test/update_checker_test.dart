@@ -98,7 +98,7 @@ void main() {
       {
         'relayUrls': ['https://relay'],
       },
-      {'useDefaultRelays': true},
+      {'useDefaultRelays': true, 'maxRemoteNatTraversalAddresses': 5},
     ]) {
       expect(AppSettings.fromJson(legacy).automaticUpdateChecks, isNull);
       for (final value in [true, false]) {
@@ -116,14 +116,12 @@ void main() {
           value,
         );
         expect(edited.lastConnectionType, 'ssh');
+        expect(
+          edited.toJson(),
+          isNot(contains('maxRemoteNatTraversalAddresses')),
+        );
       }
     }
-    final settings = AppSettings(
-      maxRemoteNatTraversalAddresses: 5,
-      automaticUpdateChecks: false,
-    ).copyWith(clearMaxRemoteNatTraversalAddresses: true);
-    expect(settings.maxRemoteNatTraversalAddresses, isNull);
-    expect(settings.automaticUpdateChecks, isFalse);
   });
 
   test(

@@ -467,7 +467,6 @@ class _SessionsScreenState extends State<SessionsScreen>
     await SettingsStorage.instance.save(settings.copyWith(
       useDefaultRelays: settings.useDefaultRelays,
       customRelayUrls: settings.customRelayUrls,
-      maxRemoteNatTraversalAddresses: settings.maxRemoteNatTraversalAddresses,
       terminalFontSize: settings.terminalFontSize,
       terminalTheme: settings.terminalTheme,
       barPosition: settings.barPosition,

@@ -78,7 +78,6 @@ class BackgroundSession {
   final String? endpointId;
   final List<String> relayUrls;
   final List<String> extraRelayUrls;
-  final int? maxRemoteNatTraversalAddresses;
 
   /// Direct SSH connection parameters.
   final String? sshHost;
@@ -139,7 +138,6 @@ class BackgroundSession {
     this.endpointId,
     this.relayUrls = const [],
     this.extraRelayUrls = const [],
-    this.maxRemoteNatTraversalAddresses,
     this.sshHost,
     this.sshPort,
     DownloadStorage? downloadStorage,
@@ -836,7 +834,6 @@ class BackgroundSession {
         endpointId: endpointId!,
         relayUrls: relayUrls,
         extraRelayUrls: extraRelayUrls,
-        maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
       );
     } else {
       _sendStatus('Reconnecting...');

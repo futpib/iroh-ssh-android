@@ -40,7 +40,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
   bool _overrideRelays = false;
   bool _useDefaultRelays = true;
   List<String> _customRelayUrls = [];
-  int? _maxRemoteNatTraversalAddresses;
   bool _connecting = false;
   String? _error;
   String? _targetError;
@@ -90,7 +89,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
       settings.copyWith(
         useDefaultRelays: settings.useDefaultRelays,
         customRelayUrls: settings.customRelayUrls,
-        maxRemoteNatTraversalAddresses: settings.maxRemoteNatTraversalAddresses,
         terminalFontSize: settings.terminalFontSize,
         terminalTheme: settings.terminalTheme,
         barPosition: settings.barPosition,
@@ -189,7 +187,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
     bool overrideRelays = false,
     bool useDefaultRelays = true,
     List<String> customRelayUrls = const [],
-    int? maxRemoteNatTraversalAddresses,
   }) async {
     final String username;
     final String? endpointId;
@@ -257,10 +254,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
         extraRelayUrls = [];
       }
 
-      final effectiveMaxNat = overrideRelays
-          ? maxRemoteNatTraversalAddresses
-          : globalSettings.maxRemoteNatTraversalAddresses;
-
       final displayName = connectionType == ConnectionType.local
           ? 'Local'
           : savedTarget;
@@ -314,7 +307,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
             keyNames: keys.map((k) => k.name).toList(),
             relayUrls: relayUrls,
             extraRelayUrls: extraRelayUrls,
-            maxRemoteNatTraversalAddresses: effectiveMaxNat,
             host: sshHost,
             sshPort: sshPort,
           ).encode(),
@@ -330,7 +322,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
               overrideRelays: overrideRelays,
               useDefaultRelays: useDefaultRelays,
               customRelayUrls: customRelayUrls,
-              maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
             ),
           );
           await _loadConnections();
@@ -355,7 +346,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
             endpointId: endpointId!,
             relayUrls: relayUrls,
             extraRelayUrls: extraRelayUrls,
-            maxRemoteNatTraversalAddresses: effectiveMaxNat,
           );
         } else if (connectionType == ConnectionType.ssh) {
           port = sshPort ?? 22;
@@ -371,7 +361,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
               overrideRelays: overrideRelays,
               useDefaultRelays: useDefaultRelays,
               customRelayUrls: customRelayUrls,
-              maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
             ),
           );
           await _loadConnections();
@@ -418,13 +407,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
     required String endpointId,
     required List<String> relayUrls,
     required List<String> extraRelayUrls,
-    int? maxRemoteNatTraversalAddresses,
   }) async {
     return await connectIroh(
       endpointId: endpointId,
       relayUrls: relayUrls,
       extraRelayUrls: extraRelayUrls,
-      maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
     );
   }
 
@@ -445,7 +432,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
       overrideRelays: _overrideRelays,
       useDefaultRelays: _useDefaultRelays,
       customRelayUrls: _customRelayUrls,
-      maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
     );
   }
 
@@ -481,7 +467,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
       _overrideRelays = conn.overrideRelays;
       _useDefaultRelays = conn.useDefaultRelays;
       _customRelayUrls = List.of(conn.customRelayUrls);
-      _maxRemoteNatTraversalAddresses = conn.maxRemoteNatTraversalAddresses;
     });
     _connectTo(
       conn.target,
@@ -490,7 +475,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
       overrideRelays: conn.overrideRelays,
       useDefaultRelays: conn.useDefaultRelays,
       customRelayUrls: conn.customRelayUrls,
-      maxRemoteNatTraversalAddresses: conn.maxRemoteNatTraversalAddresses,
     );
   }
 
@@ -623,15 +607,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     value: NetworkSettings(
                       useDefaultRelays: _useDefaultRelays,
                       customRelayUrls: _customRelayUrls,
-                      maxRemoteNatTraversalAddresses:
-                          _maxRemoteNatTraversalAddresses,
                     ),
                     onChanged: (settings) {
                       setState(() {
                         _useDefaultRelays = settings.useDefaultRelays;
                         _customRelayUrls = settings.customRelayUrls;
-                        _maxRemoteNatTraversalAddresses =
-                            settings.maxRemoteNatTraversalAddresses;
                       });
                     },
                   ),
