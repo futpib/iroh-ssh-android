@@ -37,6 +37,19 @@ void main() {
     // --- "UI" side: ZModemMux fed by StreamControllers ---
     final uiStdoutController = StreamController<Uint8List>();
     final uiStdinController = StreamController<List<int>>();
+    final pendingDeliveries = <Timer>{};
+
+    addTearDown(() async {
+      await session.disconnect();
+      session.onSendToUi = null;
+      for (final timer in pendingDeliveries) {
+        timer.cancel();
+      }
+      pendingDeliveries.clear();
+      await uiStdoutController.close();
+      await uiStdinController.close();
+      await outputDir.delete(recursive: true);
+    });
 
     final terminal = Terminal(maxLines: 10000);
 
@@ -58,7 +71,7 @@ void main() {
 
     // Wire: service output → UI stdout (simulating OutputEvent IPC)
     // Split large chunks into ~2KB pieces delivered via separate
-    // Future.delayed calls. This reproduces the Android behavior where SSH
+    // timer callbacks. This reproduces the Android behavior where SSH
     // data arrives in multiple network-sized chunks (e.g., 2069 + 2156
     // bytes) that get batched separately by BackgroundSession._flushStdout,
     // delivered as separate SendPort messages, each arriving as a distinct
@@ -85,9 +98,12 @@ void main() {
                 : bytes.length;
             final subChunk = Uint8List.fromList(bytes.sublist(offset, end));
             final d = delay;
-            Future.delayed(Duration(milliseconds: d), () {
+            late final Timer delivery;
+            delivery = Timer(Duration(milliseconds: d), () {
+              pendingDeliveries.remove(delivery);
               uiStdoutController.add(subChunk);
             });
+            pendingDeliveries.add(delivery);
             delay += 1;
           }
         }
@@ -139,11 +155,5 @@ void main() {
     final receivedContent = await receivedFile.readAsString();
     final originalContent = await File('README.md').readAsString();
     expect(receivedContent, equals(originalContent));
-
-    // Cleanup
-    await session.disconnect();
-    await uiStdoutController.close();
-    await uiStdinController.close();
-    await outputDir.delete(recursive: true);
   });
 }

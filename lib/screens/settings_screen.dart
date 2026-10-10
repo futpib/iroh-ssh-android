@@ -39,7 +39,10 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: Platform.isAndroid ? 4 : 3, vsync: this);
+    _tabController = TabController(
+      length: Platform.isAndroid ? 4 : 3,
+      vsync: this,
+    );
     _loadKeys();
     _loadSettings();
   }
@@ -75,9 +78,9 @@ class _SettingsScreenState extends State<SettingsScreen>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -94,9 +97,9 @@ class _SettingsScreenState extends State<SettingsScreen>
       await _loadKeys();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -130,13 +133,38 @@ class _SettingsScreenState extends State<SettingsScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Public Key'),
-        content: SelectableText(
-          key.publicKeyString,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+        title: Text(key.name),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add this public key to your server’s authorized_keys file.',
+              ),
+              const SizedBox(height: 16),
+              SelectableText(
+                key.publicKeyString,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ],
+          ),
         ),
         actions: [
+          if (Platform.isAndroid)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _exportPrivateKey(key);
+              },
+              child: const Text('Export private key'),
+            ),
           TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.copy, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: key.publicKeyString));
               ScaffoldMessenger.of(context).showSnackBar(
@@ -144,19 +172,7 @@ class _SettingsScreenState extends State<SettingsScreen>
               );
               Navigator.pop(ctx);
             },
-            child: const Text('Copy'),
-          ),
-          if (Platform.isAndroid)
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _exportPrivateKey(key);
-              },
-              child: const Text('Export'),
-            ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
+            label: const Text('Copy public key'),
           ),
         ],
       ),
@@ -179,9 +195,9 @@ class _SettingsScreenState extends State<SettingsScreen>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Authentication error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Authentication error: $e')));
       }
       return;
     }
@@ -237,9 +253,9 @@ class _SettingsScreenState extends State<SettingsScreen>
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error reading key: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error reading key: $e')));
       }
     }
   }
@@ -310,8 +326,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                       withData: true,
                     );
                     if (result != null && result.files.single.bytes != null) {
-                      controller.text =
-                          utf8.decode(result.files.single.bytes!);
+                      controller.text = utf8.decode(result.files.single.bytes!);
                     }
                   },
                 ),
@@ -343,7 +358,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       setState(() {
         _useDefaultRelays = settings.useDefaultRelays;
         _customRelayUrls = List.of(settings.customRelayUrls);
-        _maxRemoteNatTraversalAddresses = settings.maxRemoteNatTraversalAddresses;
+        _maxRemoteNatTraversalAddresses =
+            settings.maxRemoteNatTraversalAddresses;
         _relaysLoading = false;
         _terminalFontSize = settings.terminalFontSize;
         _terminalTheme = settings.terminalTheme;
@@ -355,28 +371,34 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   Future<void> _saveRelaySettings() async {
     final settings = await SettingsStorage.instance.load();
-    await SettingsStorage.instance.save(settings.copyWith(
-      useDefaultRelays: _useDefaultRelays,
-      customRelayUrls: _customRelayUrls,
-      maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
-      clearMaxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses == null,
-      terminalFontSize: _terminalFontSize,
-      terminalTheme: _terminalTheme,
-      barPosition: _barPosition,
-    ));
+    await SettingsStorage.instance.save(
+      settings.copyWith(
+        useDefaultRelays: _useDefaultRelays,
+        customRelayUrls: _customRelayUrls,
+        maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
+        clearMaxRemoteNatTraversalAddresses:
+            _maxRemoteNatTraversalAddresses == null,
+        terminalFontSize: _terminalFontSize,
+        terminalTheme: _terminalTheme,
+        barPosition: _barPosition,
+      ),
+    );
   }
 
   Future<void> _saveTerminalSettings() async {
     final settings = await SettingsStorage.instance.load();
-    await SettingsStorage.instance.save(settings.copyWith(
-      useDefaultRelays: _useDefaultRelays,
-      customRelayUrls: _customRelayUrls,
-      maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
-      clearMaxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses == null,
-      terminalFontSize: _terminalFontSize,
-      terminalTheme: _terminalTheme,
-      barPosition: _barPosition,
-    ));
+    await SettingsStorage.instance.save(
+      settings.copyWith(
+        useDefaultRelays: _useDefaultRelays,
+        customRelayUrls: _customRelayUrls,
+        maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
+        clearMaxRemoteNatTraversalAddresses:
+            _maxRemoteNatTraversalAddresses == null,
+        terminalFontSize: _terminalFontSize,
+        terminalTheme: _terminalTheme,
+        barPosition: _barPosition,
+      ),
+    );
   }
 
   // --- Build ---
@@ -385,34 +407,93 @@ class _SettingsScreenState extends State<SettingsScreen>
     if (_keysLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_keys == null || _keys!.isEmpty) {
-      return const Center(
-        child: Text('No keys. Tap + to generate or import.'),
-      );
-    }
-    return ListView.builder(
-      itemCount: _keys!.length,
-      itemBuilder: (context, index) {
-        final key = _keys![index];
-        return ListTile(
-          leading: const Icon(Icons.vpn_key),
-          title: Text(key.name),
-          subtitle: Text(
-            key.publicKeyString,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 11,
+    final keys = _keys ?? [];
+    if (keys.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+            child: Column(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  child: Icon(Icons.key_outlined, size: 28),
+                ),
+                SizedBox(height: 20),
+                Text(
+                  'No keys',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
+                ),
+              ],
             ),
           ),
-          trailing: IconButton(
-            icon: const Icon(Icons.delete),
-            onPressed: () => _deleteKey(key),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _generateKey,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Generate'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _importKey,
+                  icon: const Icon(Icons.file_download_outlined),
+                  label: const Text('Import'),
+                ),
+              ),
+            ],
           ),
-          onTap: () => _showPublicKeyDialog(key),
-        );
-      },
+        ],
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            IconButton(
+              onPressed: _generateKey,
+              icon: const Icon(Icons.add),
+              tooltip: 'Generate key',
+            ),
+            IconButton(
+              onPressed: _importKey,
+              icon: const Icon(Icons.file_download_outlined),
+              tooltip: 'Import key',
+            ),
+          ],
+        ),
+        for (final key in keys)
+          Card(
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 8,
+              ),
+              leading: const Icon(Icons.vpn_key),
+              title: Text(key.name),
+              subtitle: Text(
+                key.publicKeyString,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+              ),
+              trailing: PopupMenuButton<String>(
+                tooltip: 'Key actions',
+                onSelected: (_) => _deleteKey(key),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'delete', child: Text('Delete')),
+                ],
+              ),
+              onTap: () => _showPublicKeyDialog(key),
+            ),
+          ),
+      ],
     );
   }
 
@@ -466,10 +547,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             },
           ),
           const SizedBox(height: 24),
-          Text(
-            'Theme',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('Theme', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           RadioGroup<String>(
             groupValue: _terminalTheme,
@@ -491,10 +569,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
           ),
           const SizedBox(height: 24),
-          Text(
-            'Bar Position',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('Bar Position', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           RadioGroup<String>(
             groupValue: _barPosition,
@@ -508,10 +583,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   title: const Text('Bottom'),
                   value: 'bottom',
                 ),
-                RadioListTile<String>(
-                  title: const Text('Top'),
-                  value: 'top',
-                ),
+                RadioListTile<String>(title: const Text('Top'), value: 'top'),
               ],
             ),
           ),
@@ -543,30 +615,6 @@ class _SettingsScreenState extends State<SettingsScreen>
           _buildTerminalTab(),
           if (Platform.isAndroid) const UpdateSettings(),
         ],
-      ),
-      floatingActionButton: ListenableBuilder(
-        listenable: _tabController,
-        builder: (context, _) {
-          if (_tabController.index != 0) return const SizedBox.shrink();
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              FloatingActionButton.small(
-                heroTag: 'import',
-                onPressed: _importKey,
-                tooltip: 'Import key',
-                child: const Icon(Icons.file_open),
-              ),
-              const SizedBox(height: 8),
-              FloatingActionButton(
-                heroTag: 'generate',
-                onPressed: _generateKey,
-                tooltip: 'Generate key',
-                child: const Icon(Icons.add),
-              ),
-            ],
-          );
-        },
       ),
     );
   }

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:iroh_ssh_app/models/connection_target.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -23,16 +24,18 @@ class SavedConnection {
 
   String get username {
     if (connectionType == ConnectionType.local) return '';
-    return target.split('@').first;
+    return _parsedTarget?.username ?? target.split('@').first;
   }
 
   String get endpointId {
     if (connectionType != ConnectionType.iroh) return '';
-    return target.split('@').skip(1).join('@');
+    return _parsedTarget?.endpointId ?? target.split('@').skip(1).join('@');
   }
 
   String get sshHost {
     if (connectionType != ConnectionType.ssh) return '';
+    final parsed = _parsedTarget;
+    if (parsed != null) return parsed.host;
     final afterAt = target.split('@').skip(1).join('@');
     if (afterAt.contains(':')) {
       return afterAt.split(':').first;
@@ -42,6 +45,8 @@ class SavedConnection {
 
   int get sshPort {
     if (connectionType != ConnectionType.ssh) return 22;
+    final parsed = _parsedTarget;
+    if (parsed != null) return parsed.port;
     final afterAt = target.split('@').skip(1).join('@');
     if (afterAt.contains(':')) {
       return int.tryParse(afterAt.split(':').last) ?? 22;
@@ -49,19 +54,29 @@ class SavedConnection {
     return 22;
   }
 
+  ConnectionTarget? get _parsedTarget {
+    try {
+      return ConnectionTarget.parse(target, connectionType);
+    } on FormatException {
+      return null;
+    }
+  }
+
   Map<String, dynamic> toJson() => {
-        'target': target,
-        'connectionType': connectionType.name,
-        'overrideRelays': overrideRelays,
-        'useDefaultRelays': useDefaultRelays,
-        'customRelayUrls': customRelayUrls,
-        if (maxRemoteNatTraversalAddresses != null)
-          'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
-      };
+    'target': target,
+    'connectionType': connectionType.name,
+    'overrideRelays': overrideRelays,
+    'useDefaultRelays': useDefaultRelays,
+    'customRelayUrls': customRelayUrls,
+    if (maxRemoteNatTraversalAddresses != null)
+      'maxRemoteNatTraversalAddresses': maxRemoteNatTraversalAddresses,
+  };
 
   factory SavedConnection.fromJson(Map<String, dynamic> json) {
     final maxNat = json['maxRemoteNatTraversalAddresses'] as int?;
-    final connectionType = _parseConnectionType(json['connectionType'] as String?);
+    final connectionType = _parseConnectionType(
+      json['connectionType'] as String?,
+    );
 
     if (json.containsKey('useDefaultRelays')) {
       return SavedConnection(
@@ -75,8 +90,7 @@ class SavedConnection {
       );
     }
     // Backwards compat: migrate old relayUrls/extraRelayUrls
-    final oldRelayUrls =
-        (json['relayUrls'] as List?)?.cast<String>() ?? [];
+    final oldRelayUrls = (json['relayUrls'] as List?)?.cast<String>() ?? [];
     final oldExtraRelayUrls =
         (json['extraRelayUrls'] as List?)?.cast<String>() ?? [];
     if (oldRelayUrls.isNotEmpty) {
@@ -130,7 +144,9 @@ class ConnectionStorage {
 
   Future<void> save(SavedConnection connection) async {
     final connections = await list();
-    final existing = connections.indexWhere((c) => c.target == connection.target);
+    final existing = connections.indexWhere(
+      (c) => c.target == connection.target,
+    );
     if (existing >= 0) {
       connections[existing] = connection;
     } else {
@@ -148,6 +164,8 @@ class ConnectionStorage {
   Future<void> _write(List<SavedConnection> connections) async {
     _cache = connections;
     final f = await _file;
-    await f.writeAsString(jsonEncode(connections.map((c) => c.toJson()).toList()));
+    await f.writeAsString(
+      jsonEncode(connections.map((c) => c.toJson()).toList()),
+    );
   }
 }

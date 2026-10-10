@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:iroh_ssh_app/models/connection_target.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
@@ -41,6 +43,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   int? _maxRemoteNatTraversalAddresses;
   bool _connecting = false;
   String? _error;
+  String? _targetError;
   List<SavedConnection> _savedConnections = [];
 
   @override
@@ -83,16 +86,18 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   Future<void> _persistLastConnectionType(ConnectionType type) async {
     final settings = await SettingsStorage.instance.load();
-    await SettingsStorage.instance.save(settings.copyWith(
-      useDefaultRelays: settings.useDefaultRelays,
-      customRelayUrls: settings.customRelayUrls,
-      maxRemoteNatTraversalAddresses: settings.maxRemoteNatTraversalAddresses,
-      terminalFontSize: settings.terminalFontSize,
-      terminalTheme: settings.terminalTheme,
-      barPosition: settings.barPosition,
-      tabViewStyle: settings.tabViewStyle,
-      lastConnectionType: type.name,
-    ));
+    await SettingsStorage.instance.save(
+      settings.copyWith(
+        useDefaultRelays: settings.useDefaultRelays,
+        customRelayUrls: settings.customRelayUrls,
+        maxRemoteNatTraversalAddresses: settings.maxRemoteNatTraversalAddresses,
+        terminalFontSize: settings.terminalFontSize,
+        terminalTheme: settings.terminalTheme,
+        barPosition: settings.barPosition,
+        tabViewStyle: settings.tabViewStyle,
+        lastConnectionType: type.name,
+      ),
+    );
   }
 
   Future<void> _loadConnections() async {
@@ -100,6 +105,35 @@ class _ConnectScreenState extends State<ConnectScreen> {
     if (mounted) {
       setState(() => _savedConnections = connections);
     }
+  }
+
+  Future<void> _openSettings() async {
+    await Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+  }
+
+  Future<void> _pasteTarget() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (!mounted || data == null) return;
+    setState(() {
+      _targetController.text = data.text?.trim() ?? '';
+      _targetController.selection = TextSelection.collapsed(
+        offset: _targetController.text.length,
+      );
+      _targetError = null;
+    });
+  }
+
+  Future<void> _scanTarget() async {
+    final result = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const QrScannerScreen()));
+    if (result == null || !mounted) return;
+    setState(() {
+      _targetController.text = result.trim();
+      _targetError = null;
+    });
   }
 
   @override
@@ -148,55 +182,56 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
   }
 
-  Future<void> _connectTo(String target,
-      {ConnectionType connectionType = ConnectionType.iroh,
-      TabKind kind = TabKind.terminal,
-      bool overrideRelays = false,
-      bool useDefaultRelays = true,
-      List<String> customRelayUrls = const [],
-      int? maxRemoteNatTraversalAddresses}) async {
+  Future<void> _connectTo(
+    String target, {
+    ConnectionType connectionType = ConnectionType.iroh,
+    TabKind kind = TabKind.terminal,
+    bool overrideRelays = false,
+    bool useDefaultRelays = true,
+    List<String> customRelayUrls = const [],
+    int? maxRemoteNatTraversalAddresses,
+  }) async {
     final String username;
     final String? endpointId;
     final String? sshHost;
     final int? sshPort;
+    final String savedTarget;
 
     switch (connectionType) {
-      case ConnectionType.iroh:
-        if (!target.contains('@')) {
-          setState(() => _error = 'Expected format: user@endpoint_id');
+      case ConnectionType.iroh || ConnectionType.ssh:
+        ConnectionTarget parsed;
+        try {
+          parsed = ConnectionTarget.parse(target, connectionType);
+        } on FormatException catch (e) {
+          setState(() {
+            _targetError = e.message.toString();
+            _error = null;
+          });
           return;
         }
-        username = target.split('@').first;
-        endpointId = target.split('@').skip(1).join('@');
-        sshHost = null;
-        sshPort = null;
-
-      case ConnectionType.ssh:
-        if (!target.contains('@')) {
-          setState(() => _error = 'Expected format: user@host or user@host:port');
-          return;
-        }
-        username = target.split('@').first;
-        endpointId = null;
-        final afterAt = target.split('@').skip(1).join('@');
-        if (afterAt.contains(':')) {
-          sshHost = afterAt.split(':').first;
-          sshPort = int.tryParse(afterAt.split(':').last) ?? 22;
-        } else {
-          sshHost = afterAt;
-          sshPort = 22;
-        }
+        username = parsed.username;
+        endpointId = connectionType == ConnectionType.iroh
+            ? parsed.endpointId
+            : null;
+        sshHost = connectionType == ConnectionType.ssh ? parsed.host : null;
+        sshPort = connectionType == ConnectionType.ssh ? parsed.port : null;
+        savedTarget = parsed.formatted;
 
       case ConnectionType.local:
         username = '';
         endpointId = null;
         sshHost = null;
         sshPort = null;
+        savedTarget = '';
     }
 
     setState(() {
       _connecting = true;
       _error = null;
+      _targetError = null;
+      if (connectionType != ConnectionType.local) {
+        _targetController.text = savedTarget;
+      }
     });
 
     _persistLastConnectionType(connectionType);
@@ -205,10 +240,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
       final keys = await KeyStorage.instance.listKeys();
       final globalSettings = await SettingsStorage.instance.load();
 
-      final effectiveUseDefaultRelays =
-          overrideRelays ? useDefaultRelays : globalSettings.useDefaultRelays;
-      final effectiveCustomRelayUrls =
-          overrideRelays ? customRelayUrls : globalSettings.customRelayUrls;
+      final effectiveUseDefaultRelays = overrideRelays
+          ? useDefaultRelays
+          : globalSettings.useDefaultRelays;
+      final effectiveCustomRelayUrls = overrideRelays
+          ? customRelayUrls
+          : globalSettings.customRelayUrls;
 
       final List<String> relayUrls;
       final List<String> extraRelayUrls;
@@ -226,7 +263,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
       final displayName = connectionType == ConnectionType.local
           ? 'Local'
-          : target;
+          : savedTarget;
 
       if (Platform.isAndroid) {
         await _ensureServiceStarted();
@@ -241,15 +278,21 @@ class _ConnectScreenState extends State<ConnectScreen> {
             if (event is ConnectedEvent) {
               FlutterForegroundTask.removeTaskDataCallback(onData);
               if (!completer.isCompleted) {
-                completer.complete(SshSessionInfo(
-                  sessionId: event.sessionId,
-                  host: event.host ?? (connectionType == ConnectionType.ssh ? sshHost! : 'localhost'),
-                  port: event.port,
-                  username: event.username,
-                  displayName: event.displayName,
-                  connectionType: connectionType,
-                  kind: kind,
-                ));
+                completer.complete(
+                  SshSessionInfo(
+                    sessionId: event.sessionId,
+                    host:
+                        event.host ??
+                        (connectionType == ConnectionType.ssh
+                            ? sshHost!
+                            : 'localhost'),
+                    port: event.port,
+                    username: event.username,
+                    displayName: event.displayName,
+                    connectionType: connectionType,
+                    kind: kind,
+                  ),
+                );
               }
             } else if (event is ErrorEvent) {
               FlutterForegroundTask.removeTaskDataCallback(onData);
@@ -261,31 +304,35 @@ class _ConnectScreenState extends State<ConnectScreen> {
         }
 
         FlutterForegroundTask.addTaskDataCallback(onData);
-        FlutterForegroundTask.sendDataToTask(ConnectCommand(
-          connectionType: connectionType,
-          kind: kind,
-          endpointId: endpointId,
-          username: username,
-          displayName: displayName,
-          keyNames: keys.map((k) => k.name).toList(),
-          relayUrls: relayUrls,
-          extraRelayUrls: extraRelayUrls,
-          maxRemoteNatTraversalAddresses: effectiveMaxNat,
-          host: sshHost,
-          sshPort: sshPort,
-        ).encode());
+        FlutterForegroundTask.sendDataToTask(
+          ConnectCommand(
+            connectionType: connectionType,
+            kind: kind,
+            endpointId: endpointId,
+            username: username,
+            displayName: displayName,
+            keyNames: keys.map((k) => k.name).toList(),
+            relayUrls: relayUrls,
+            extraRelayUrls: extraRelayUrls,
+            maxRemoteNatTraversalAddresses: effectiveMaxNat,
+            host: sshHost,
+            sshPort: sshPort,
+          ).encode(),
+        );
 
         final sessionInfo = await completer.future;
 
         if (connectionType != ConnectionType.local) {
-          await ConnectionStorage.instance.save(SavedConnection(
-            target: target,
-            connectionType: connectionType,
-            overrideRelays: overrideRelays,
-            useDefaultRelays: useDefaultRelays,
-            customRelayUrls: customRelayUrls,
-            maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
-          ));
+          await ConnectionStorage.instance.save(
+            SavedConnection(
+              target: savedTarget,
+              connectionType: connectionType,
+              overrideRelays: overrideRelays,
+              useDefaultRelays: useDefaultRelays,
+              customRelayUrls: customRelayUrls,
+              maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
+            ),
+          );
           await _loadConnections();
         }
 
@@ -296,8 +343,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
         } else {
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) =>
-                  SessionsScreen(existingSessions: [sessionInfo]),
+              builder: (_) => SessionsScreen(existingSessions: [sessionInfo]),
             ),
           );
         }
@@ -318,14 +364,16 @@ class _ConnectScreenState extends State<ConnectScreen> {
         }
 
         if (connectionType != ConnectionType.local) {
-          await ConnectionStorage.instance.save(SavedConnection(
-            target: target,
-            connectionType: connectionType,
-            overrideRelays: overrideRelays,
-            useDefaultRelays: useDefaultRelays,
-            customRelayUrls: customRelayUrls,
-            maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
-          ));
+          await ConnectionStorage.instance.save(
+            SavedConnection(
+              target: savedTarget,
+              connectionType: connectionType,
+              overrideRelays: overrideRelays,
+              useDefaultRelays: useDefaultRelays,
+              customRelayUrls: customRelayUrls,
+              maxRemoteNatTraversalAddresses: maxRemoteNatTraversalAddresses,
+            ),
+          );
           await _loadConnections();
         }
 
@@ -351,8 +399,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
         } else {
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) =>
-                  SessionsScreen(existingSessions: [sessionInfo]),
+              builder: (_) => SessionsScreen(existingSessions: [sessionInfo]),
             ),
           );
         }
@@ -383,26 +430,23 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   Future<void> _connect() async {
     if (_connectionType == ConnectionType.local) {
-      await _connectTo('',
-          connectionType: ConnectionType.local, kind: _tabKind);
+      await _connectTo(
+        '',
+        connectionType: ConnectionType.local,
+        kind: _tabKind,
+      );
       return;
     }
 
-    final raw = _targetController.text.trim();
-    if (raw.isEmpty) {
-      final hint = _connectionType == ConnectionType.iroh
-          ? 'Paste a target like user@endpoint_id'
-          : 'Enter a target like user@host or user@host:port';
-      setState(() => _error = hint);
-      return;
-    }
-    await _connectTo(raw,
-        connectionType: _connectionType,
-        kind: _tabKind,
-        overrideRelays: _overrideRelays,
-        useDefaultRelays: _useDefaultRelays,
-        customRelayUrls: _customRelayUrls,
-        maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses);
+    await _connectTo(
+      _targetController.text,
+      connectionType: _connectionType,
+      kind: _tabKind,
+      overrideRelays: _overrideRelays,
+      useDefaultRelays: _useDefaultRelays,
+      customRelayUrls: _customRelayUrls,
+      maxRemoteNatTraversalAddresses: _maxRemoteNatTraversalAddresses,
+    );
   }
 
   Future<void> _deleteConnection(SavedConnection connection) async {
@@ -439,20 +483,22 @@ class _ConnectScreenState extends State<ConnectScreen> {
       _customRelayUrls = List.of(conn.customRelayUrls);
       _maxRemoteNatTraversalAddresses = conn.maxRemoteNatTraversalAddresses;
     });
-    _connectTo(conn.target,
-        connectionType: conn.connectionType,
-        kind: _tabKind,
-        overrideRelays: conn.overrideRelays,
-        useDefaultRelays: conn.useDefaultRelays,
-        customRelayUrls: conn.customRelayUrls,
-        maxRemoteNatTraversalAddresses: conn.maxRemoteNatTraversalAddresses);
+    _connectTo(
+      conn.target,
+      connectionType: conn.connectionType,
+      kind: _tabKind,
+      overrideRelays: conn.overrideRelays,
+      useDefaultRelays: conn.useDefaultRelays,
+      customRelayUrls: conn.customRelayUrls,
+      maxRemoteNatTraversalAddresses: conn.maxRemoteNatTraversalAddresses,
+    );
   }
 
   IconData _iconForConnectionType(ConnectionType type) => switch (type) {
-        ConnectionType.iroh => Icons.cloud,
-        ConnectionType.ssh => Icons.computer,
-        ConnectionType.local => Icons.terminal,
-      };
+    ConnectionType.iroh => Icons.cloud,
+    ConnectionType.ssh => Icons.computer,
+    ConnectionType.local => Icons.terminal,
+  };
 
   String _subtitleForConnection(SavedConnection conn) {
     switch (conn.connectionType) {
@@ -460,7 +506,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
         return conn.endpointId;
       case ConnectionType.ssh:
         final port = conn.sshPort;
-        return port != 22 ? '${conn.sshHost}:$port' : conn.sshHost;
+        final host = conn.sshHost.contains(':')
+            ? '[${conn.sshHost}]'
+            : conn.sshHost;
+        return port != 22 ? '$host:$port' : host;
       case ConnectionType.local:
         return 'Local';
     }
@@ -474,193 +523,204 @@ class _ConnectScreenState extends State<ConnectScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-            },
+            onPressed: _openSettings,
             tooltip: 'Settings',
           ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
         children: [
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SegmentedButton<ConnectionType>(
-                  segments: ConnectionType.values.map((type) {
-                    return ButtonSegment<ConnectionType>(
-                      value: type,
-                      label: Text(type.label),
-                      icon: Icon(_iconForConnectionType(type)),
-                    );
-                  }).toList(),
-                  selected: {_connectionType},
-                  onSelectionChanged: (selected) {
-                    setState(() {
-                      _connectionType = selected.first;
-                      _error = null;
-                    });
-                  },
-                ),
-                const SizedBox(height: 12),
-                SegmentedButton<TabKind>(
-                  segments: TabKind.values.map((kind) {
-                    return ButtonSegment<TabKind>(
-                      value: kind,
-                      label: Text(kind.label),
-                      icon: Icon(kind == TabKind.terminal
-                          ? Icons.terminal
-                          : Icons.folder_outlined),
-                    );
-                  }).toList(),
-                  selected: {_tabKind},
-                  onSelectionChanged: (selected) {
-                    setState(() => _tabKind = selected.first);
-                  },
-                ),
-                const SizedBox(height: 16),
-                if (_connectionType != ConnectionType.local) ...[
-                  TextField(
-                    controller: _targetController,
-                    decoration: InputDecoration(
-                      labelText: 'Target',
-                      hintText: _connectionType == ConnectionType.iroh
-                          ? 'user@endpoint_id'
-                          : 'user@host or user@host:port',
-                      border: const OutlineInputBorder(),
-                      suffixIcon: Platform.isAndroid
-                          ? IconButton(
-                              icon: const Icon(Icons.qr_code_scanner),
-                              tooltip: 'Scan QR code',
-                              onPressed: () async {
-                                final result =
-                                    await Navigator.of(context).push<String>(
-                                  MaterialPageRoute(
-                                    builder: (_) => const QrScannerScreen(),
-                                  ),
-                                );
-                                if (result != null) {
-                                  _targetController.text = result;
-                                }
-                              },
-                            )
-                          : null,
-                    ),
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    onSubmitted: (_) => _connect(),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                if (_connectionType == ConnectionType.iroh) ...[
-                  ExpansionTile(
-                    title: const Text('Advanced'),
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: const EdgeInsets.only(bottom: 8),
-                    children: [
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Override global network settings'),
-                        value: _overrideRelays,
-                        onChanged: (value) =>
-                            setState(() => _overrideRelays = value),
-                      ),
-                      if (_overrideRelays)
-                        NetworkSettingsEditor(
-                          value: NetworkSettings(
-                            useDefaultRelays: _useDefaultRelays,
-                            customRelayUrls: _customRelayUrls,
-                            maxRemoteNatTraversalAddresses:
-                                _maxRemoteNatTraversalAddresses,
-                          ),
-                          onChanged: (settings) {
-                            setState(() {
-                              _useDefaultRelays = settings.useDefaultRelays;
-                              _customRelayUrls = settings.customRelayUrls;
-                              _maxRemoteNatTraversalAddresses =
-                                  settings.maxRemoteNatTraversalAddresses;
-                            });
-                          },
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                ] else ...[
-                  const SizedBox(height: 8),
-                ],
-                FilledButton(
-                  onPressed: _connecting ? null : _connect,
-                  child: _connecting
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(_tabKind == TabKind.files
-                          ? 'Open Files'
-                          : _connectionType == ConnectionType.local
-                              ? 'Open Shell'
-                              : 'Connect'),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    _error!,
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
-                ],
-              ],
-            ),
+          SegmentedButton<ConnectionType>(
+            segments: ConnectionType.values.map((type) {
+              return ButtonSegment<ConnectionType>(
+                value: type,
+                label: Text(type.label),
+                icon: Icon(_iconForConnectionType(type)),
+              );
+            }).toList(),
+            selected: {_connectionType},
+            onSelectionChanged: (selected) {
+              setState(() {
+                _connectionType = selected.first;
+                _error = null;
+                _targetError = null;
+              });
+            },
           ),
-          if (_savedConnections.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                'Saved Connections',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+          const SizedBox(height: 12),
+          SegmentedButton<TabKind>(
+            segments: TabKind.values.map((kind) {
+              return ButtonSegment<TabKind>(
+                value: kind,
+                label: Text(kind.label),
+                icon: Icon(
+                  kind == TabKind.terminal
+                      ? Icons.terminal
+                      : Icons.folder_outlined,
+                ),
+              );
+            }).toList(),
+            selected: {_tabKind},
+            onSelectionChanged: (selected) {
+              setState(() => _tabKind = selected.first);
+            },
+          ),
+          const SizedBox(height: 16),
+          if (_connectionType != ConnectionType.local) ...[
+            TextField(
+              controller: _targetController,
+              decoration: InputDecoration(
+                labelText: 'Target',
+                hintText: _connectionType == ConnectionType.iroh
+                    ? 'user@64-character-endpoint-id'
+                    : 'user@host:port or user@[IPv6]:port',
+                errorText: _targetError,
+                border: const OutlineInputBorder(),
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.content_paste_outlined),
+                      tooltip: 'Paste target',
+                      onPressed: _connecting ? null : _pasteTarget,
+                    ),
+                    if (Platform.isAndroid)
+                      IconButton(
+                        icon: const Icon(Icons.qr_code_scanner),
+                        tooltip: 'Scan QR code',
+                        onPressed: _connecting ? null : _scanTarget,
+                      ),
+                  ],
                 ),
               ),
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.done,
+              autocorrect: false,
+              enableSuggestions: false,
+              onChanged: (_) {
+                if (_targetError != null) {
+                  setState(() => _targetError = null);
+                }
+              },
+              onSubmitted: (_) => _connect(),
             ),
+          ],
+          if (_connectionType == ConnectionType.iroh) ...[
+            ExpansionTile(
+              title: const Text('Advanced'),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Override global network settings'),
+                  value: _overrideRelays,
+                  onChanged: (value) => setState(() => _overrideRelays = value),
+                ),
+                if (_overrideRelays)
+                  NetworkSettingsEditor(
+                    value: NetworkSettings(
+                      useDefaultRelays: _useDefaultRelays,
+                      customRelayUrls: _customRelayUrls,
+                      maxRemoteNatTraversalAddresses:
+                          _maxRemoteNatTraversalAddresses,
+                    ),
+                    onChanged: (settings) {
+                      setState(() {
+                        _useDefaultRelays = settings.useDefaultRelays;
+                        _customRelayUrls = settings.customRelayUrls;
+                        _maxRemoteNatTraversalAddresses =
+                            settings.maxRemoteNatTraversalAddresses;
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ] else ...[
             const SizedBox(height: 8),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _savedConnections.length,
-                itemBuilder: (context, index) {
-                  final conn = _savedConnections[index];
-                  return ListTile(
-                    leading: Icon(_iconForConnectionType(conn.connectionType)),
-                    title: Text(conn.connectionType == ConnectionType.local
-                        ? 'Local'
-                        : conn.username),
-                    subtitle: Text(
-                      _subtitleForConnection(conn),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                      ),
-                    ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () => _deleteConnection(conn),
-                    ),
-                    onTap: _connecting
-                        ? null
-                        : () => _onSavedConnectionTap(conn),
-                  );
-                },
+          ],
+          FilledButton(
+            onPressed: _connecting ? null : _connect,
+            child: _connecting
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(
+                    _tabKind == TabKind.files
+                        ? 'Open Files'
+                        : _connectionType == ConnectionType.local
+                        ? 'Open Shell'
+                        : 'Connect',
+                  ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 16),
+            Card(
+              color: Theme.of(context).colorScheme.errorContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onErrorContainer,
+                  ),
+                ),
               ),
             ),
           ],
+          const SizedBox(height: 28),
+          Text(
+            'Saved connections',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          if (_savedConnections.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: Column(
+                children: [
+                  Icon(Icons.history, size: 32),
+                  SizedBox(height: 12),
+                  Text(
+                    'No saved connections',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Successful connections are saved here.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          for (final conn in _savedConnections)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: Icon(_iconForConnectionType(conn.connectionType)),
+                title: Text(
+                  conn.connectionType == ConnectionType.local
+                      ? 'Local'
+                      : conn.username,
+                ),
+                subtitle: Text(
+                  _subtitleForConnection(conn),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                ),
+                trailing: IconButton(
+                  tooltip: 'Remove connection',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _deleteConnection(conn),
+                ),
+                onTap: _connecting ? null : () => _onSavedConnectionTap(conn),
+              ),
+            ),
         ],
       ),
     );

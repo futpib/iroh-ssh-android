@@ -96,15 +96,19 @@ this updater; it does not switch signing keys or release variants.
 ### iroh P2P connection
 
 1. On the server side, expose an SSH server through [iroh-ssh](https://github.com/futpib/iroh-ssh) and note the endpoint ID it prints.
-2. Open the app, select the **Iroh** tab, and type (or scan on Android) the connection target in the form `user@<endpoint-id>`.
+2. Open the app, select the **Iroh** tab, and type or paste the connection target in the form `user@<endpoint-id>` (or scan it on Android).
 3. Tap **Connect**.
 
 The app will establish a peer-to-peer tunnel and open an interactive terminal session.
 
 ### Direct SSH connection
 
-1. Select the **SSH** tab and enter a target in the form `user@host` or `user@host:port`.
+1. Select the **SSH** tab and type or paste a target in the form `user@host`, `user@host:port`, or `user@[IPv6]:port`.
 2. Tap **Connect**.
+
+Open **Settings → Keys** to generate or import an identity.
+Stored keys are offered when the server accepts key authentication; the app
+still shows password or other prompts selected during SSH authentication.
 
 ### Local shell
 
