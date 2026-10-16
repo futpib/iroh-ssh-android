@@ -10,7 +10,7 @@ import 'package:iroh_ssh_app/services/session_messages.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const channel = MethodChannel('iroh_ssh/openkeychain');
+  const channel = MethodChannel(openKeychainChannelName);
 
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

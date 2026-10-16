@@ -43,6 +43,8 @@ dependencies:
       url: https://github.com/futpib/xterm.dart
       ref: d96d89f0a8996d22464b541351ff4773b1fa827e
   dartssh2: ^4.1.0
+  openkeychain_ssh:
+    path: packages/openkeychain_ssh
   path_provider: ^2.1.6
   pinenacl: ^0.6.0
   flutter_foreground_task: ^11.0.3

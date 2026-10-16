@@ -1,6 +1,7 @@
 package com.github.futpib.iroh_ssh_app
 
 import android.content.Context
+import io.github.futpib.openkeychain_ssh.OpenKeychainBridge
 import com.pravera.flutter_foreground_task.FlutterForegroundTaskLifecycleListener
 import com.pravera.flutter_foreground_task.FlutterForegroundTaskStarter
 import io.flutter.embedding.engine.FlutterEngine
@@ -15,12 +16,14 @@ import io.flutter.embedding.engine.FlutterEngine
  */
 class FgtEngineListener(context: Context) : FlutterForegroundTaskLifecycleListener {
     private val appContext = context.applicationContext
+    private var openKeychainMessenger: io.flutter.plugin.common.BinaryMessenger? = null
 
     override fun onEngineCreate(flutterEngine: FlutterEngine?) {
         val messenger = flutterEngine?.dartExecutor?.binaryMessenger ?: return
         MediaStoreSaver.register(messenger, appContext)
         TransferNotificationManager.register(messenger, appContext)
         OpenKeychainBridge.register(messenger, appContext)
+        openKeychainMessenger = messenger
     }
 
     override fun onTaskStart(starter: FlutterForegroundTaskStarter) {}
@@ -30,6 +33,8 @@ class FgtEngineListener(context: Context) : FlutterForegroundTaskLifecycleListen
     override fun onTaskDestroy() {}
 
     override fun onEngineWillDestroy() {
+        openKeychainMessenger?.let(OpenKeychainBridge::unregister)
+        openKeychainMessenger = null
         TransferNotificationManager.unregister()
     }
 }

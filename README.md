@@ -116,6 +116,8 @@ provider retains the private key and handles its own unlock, biometric, or
 security-token confirmation when Iroh SSH needs a signature. Keep Iroh SSH in
 the foreground when the provider requires interaction. Only the provider name,
 key reference, description, and SSH public key are saved by Iroh SSH.
+The Android provider integration is maintained in the shared
+[`openkeychain_ssh` Flutter plugin](packages/openkeychain_ssh/README.md).
 
 ### Local shell
 
