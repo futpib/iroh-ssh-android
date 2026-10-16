@@ -1,0 +1,26 @@
+name: Copy signing credentials to slopd
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Copy signing credentials
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.SLOPD_SECRETS_TOKEN }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?Missing SLOPD_SECRETS_TOKEN}"
+          : "${KEYSTORE_BASE64:?Missing KEYSTORE_BASE64}"
+
+          printf '%s' "$KEYSTORE_BASE64" |
+            gh secret set KEYSTORE_BASE64 --repo futpib/slopd
+
+          echo "Signing keystore copied to futpib/slopd."
