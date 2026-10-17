@@ -144,7 +144,8 @@ copies the terminal buffer currently exposed by tmux, not its hidden history.
 ## Building
 
 Prerequisites:
-- [Flutter](https://docs.flutter.dev/get-started/install) (see `.fvmrc` for the Flutter channel tracked via [fvm](https://fvm.app/))
+- [Flutter](https://docs.flutter.dev/get-started/install) 3.47.5 (pinned in `.fvmrc` for [fvm](https://fvm.app/))
+- JDK 25 for Android builds (the app targets Java 17 bytecode)
 - [Rust](https://rustup.rs/) with the Android NDK targets (for Android builds)
 - [flutter\_rust\_bridge\_codegen](https://cjycode.com/flutter_rust_bridge/integrate/setup_toolchain) for regenerating the FFI bindings
 
