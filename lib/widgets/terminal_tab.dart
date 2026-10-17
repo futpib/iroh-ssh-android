@@ -17,6 +17,7 @@ import 'package:iroh_ssh_app/services/identity_selection.dart';
 import 'package:iroh_ssh_app/services/known_hosts.dart';
 import 'package:iroh_ssh_app/widgets/host_key_dialog.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
+import 'package:iroh_ssh_app/services/ssh_authentication.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/widgets/session_tab_controller.dart';
 import 'package:iroh_ssh_app/widgets/terminal_pane.dart';
@@ -484,11 +485,10 @@ class TerminalTabState extends State<TerminalTab>
         const [],
       );
 
-      final socket = await SSHSocket.connect(
-          widget.session.host, widget.session.port);
-
-      _client = SSHClient(
-        socket,
+      _terminal.write('Authenticating...\r\n');
+      _client = await connectAuthenticatedSsh(
+        host: widget.session.host,
+        port: widget.session.port,
         username: widget.session.username,
         identities: identities,
         // Iroh authenticates its endpoint; direct SSH needs a pinned host key.
@@ -515,9 +515,11 @@ class TerminalTabState extends State<TerminalTab>
         onUserauthBanner: (banner) {
           _terminal.write(banner.replaceAll('\n', '\r\n'));
         },
+        onClientCreated: (client) {
+          if (!mounted) throw StateError('Connection cancelled');
+          _client = client;
+        },
       );
-
-      _terminal.write('Authenticating...\r\n');
 
       _session = await _client!.shell(
         pty: SSHPtyConfig(

@@ -20,6 +20,7 @@ import 'package:iroh_ssh_app/services/identity_selection.dart';
 import 'package:iroh_ssh_app/services/known_hosts.dart';
 import 'package:iroh_ssh_app/widgets/host_key_dialog.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
+import 'package:iroh_ssh_app/services/ssh_authentication.dart';
 import 'package:iroh_ssh_app/services/transfer_notification.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
 import 'package:iroh_ssh_app/widgets/session_tab_controller.dart';
@@ -248,10 +249,9 @@ class FileManagerTabState extends State<FileManagerTab>
         keys,
         const [],
       );
-      final socket = await SSHSocket.connect(
-          widget.session.host, widget.session.port);
-      final client = SSHClient(
-        socket,
+      final client = await connectAuthenticatedSsh(
+        host: widget.session.host,
+        port: widget.session.port,
         username: widget.session.username,
         identities: identities,
         // Iroh authenticates its endpoint; direct SSH needs a pinned host key.
@@ -273,8 +273,11 @@ class FileManagerTabState extends State<FileManagerTab>
           }
           return responses;
         },
+        onClientCreated: (client) {
+          if (!mounted) throw StateError('Connection cancelled');
+          _client = client;
+        },
       );
-      _client = client;
       _fs = SftpFs(await client.sftp());
       await _onReady();
     } catch (e) {

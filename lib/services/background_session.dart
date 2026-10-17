@@ -16,6 +16,7 @@ import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
 import 'package:iroh_ssh_app/services/fs/upload_naming.dart';
 import 'package:iroh_ssh_app/services/media_store.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
+import 'package:iroh_ssh_app/services/ssh_authentication.dart';
 import 'package:iroh_ssh_app/services/terminal_replay_buffer.dart';
 import 'package:iroh_ssh_app/services/transfer_notification.dart';
 import 'package:iroh_ssh_app/services/transfer_notifications.dart';
@@ -168,19 +169,18 @@ class BackgroundSession {
     _sendStatus('Connecting to $connectHost:$connectPort...');
 
     try {
-      final socket = await SSHSocket.connect(connectHost, connectPort);
-
-      _client = SSHClient(
-        socket,
+      _sendStatus('Authenticating...');
+      final generation = _connectionGeneration;
+      _client = await connectAuthenticatedSsh(
+        host: connectHost,
+        port: connectPort,
         username: username,
         identities: identities,
         // Iroh authenticates its endpoint; direct SSH must verify the host key.
         onVerifyHostKey: connectionType == ConnectionType.ssh
             ? verifyHostKey
             : null,
-        onPasswordRequest: () async {
-          return await _requestAuth('Password: ', echo: false);
-        },
+        onPasswordRequest: () => _requestAuth('Password: ', echo: false),
         onUserInfoRequest: (request) async {
           if (request.prompts.isEmpty) return [];
           final responses = <String>[];
@@ -196,9 +196,14 @@ class BackgroundSession {
           replayBuffer.write(bytes);
           _forwardOutput(bytes);
         },
+        onClientCreated: (client) {
+          if (generation != _connectionGeneration ||
+              state == SessionState.disconnected) {
+            throw StateError('Connection cancelled');
+          }
+          _client = client;
+        },
       );
-
-      _sendStatus('Authenticating...');
 
       if (kind == TabKind.files) {
         // Open an SFTP channel over the same authenticated connection instead
