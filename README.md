@@ -107,8 +107,11 @@ The app will establish a peer-to-peer tunnel and open an interactive terminal se
 2. Tap **Connect**.
 
 Open **Settings → Keys** to generate or import an identity.
-Stored keys are offered when the server accepts key authentication; the app
-still shows password or other prompts selected during SSH authentication.
+On the connection screen, expand **SSH authentication** to choose which keys to
+offer and their order. A sole saved key is selected automatically; with multiple
+keys, choose the key for that destination. Saved connections remember the
+selection, including **Password / no SSH key**. The app still shows password or
+other prompts selected during SSH authentication.
 
 On Android, **Settings → Keys → OpenKeychain** can add an authentication-capable
 key from any installed provider of the OpenKeychain SSH authentication API. The
@@ -116,6 +119,8 @@ provider retains the private key and handles its own unlock, biometric, or
 security-token confirmation when Iroh SSH needs a signature. Keep Iroh SSH in
 the foreground when the provider requires interaction. Only the provider name,
 key reference, description, and SSH public key are saved by Iroh SSH.
+**Cancel key import** stops a pending provider request without saving its late
+response.
 The Android provider integration is maintained in the shared
 [`openkeychain_ssh` Flutter plugin](packages/openkeychain_ssh/README.md).
 

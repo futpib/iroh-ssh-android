@@ -1,11 +1,11 @@
 import 'dart:convert';
 
-import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/services/background_session.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/identity_selection.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/transfer_notifications.dart';
 import 'package:iroh_ssh_app/src/rust/api/simple.dart';
@@ -111,13 +111,13 @@ class SshSessionService extends TaskHandler {
 
   Future<void> _handleConnectIroh(String sessionId, ConnectCommand command) async {
     final keys = await KeyStorage.instance.listKeys();
-    final requestedKeyNames = command.keyNames.toSet();
-    final identities = <SSHIdentity>[
-      ...keys
-          .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
-          .map((k) => k.keyPair),
-      ...command.openKeychainKeys.map((key) => key.createIdentity()),
+    final selectedIds = command.identityIds ?? [
+      ...command.keyNames.map(localIdentityId),
+      ...command.openKeychainKeys.map(externalIdentityId),
     ];
+    final identities = resolveIdentities(
+      selectedIds, keys, command.openKeychainKeys,
+    );
 
     final port = await connectIroh(
       endpointId: command.endpointId!,
@@ -143,13 +143,13 @@ class SshSessionService extends TaskHandler {
 
   Future<void> _handleConnectSsh(String sessionId, ConnectCommand command) async {
     final keys = await KeyStorage.instance.listKeys();
-    final requestedKeyNames = command.keyNames.toSet();
-    final identities = <SSHIdentity>[
-      ...keys
-          .where((k) => requestedKeyNames.isEmpty || requestedKeyNames.contains(k.name))
-          .map((k) => k.keyPair),
-      ...command.openKeychainKeys.map((key) => key.createIdentity()),
+    final selectedIds = command.identityIds ?? [
+      ...command.keyNames.map(localIdentityId),
+      ...command.openKeychainKeys.map(externalIdentityId),
     ];
+    final identities = resolveIdentities(
+      selectedIds, keys, command.openKeychainKeys,
+    );
 
     final session = BackgroundSession(
       sessionId: sessionId,

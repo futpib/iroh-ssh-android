@@ -10,6 +10,7 @@ import 'package:iroh_ssh_app/models/tab_kind.dart';
 import 'package:iroh_ssh_app/screens/qr_scanner_screen.dart';
 import 'package:iroh_ssh_app/services/connection_storage.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/identity_selection.dart';
 import 'package:iroh_ssh_app/services/open_keychain.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
 import 'package:iroh_ssh_app/services/session_service.dart';
@@ -45,18 +46,25 @@ class _ConnectScreenState extends State<ConnectScreen> {
   String? _error;
   String? _targetError;
   List<SavedConnection> _savedConnections = [];
+  List<AvailableIdentity> _availableIdentities = [];
+  List<String> _selectedIdentityIds = [];
+  bool _identitySelectionEdited = false;
 
   @override
   void initState() {
     super.initState();
     _loadConnections();
+    _loadIdentityOptions();
     _initConnectionType();
   }
 
   Future<void> _initConnectionType() async {
     final type = await _computeDefaultConnectionType();
     if (mounted) {
-      setState(() => _connectionType = type);
+      setState(() {
+        _connectionType = type;
+        if (!_identitySelectionEdited) _selectIdentitiesForTarget();
+      });
     }
   }
 
@@ -102,14 +110,55 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Future<void> _loadConnections() async {
     final connections = await ConnectionStorage.instance.list();
     if (mounted) {
-      setState(() => _savedConnections = connections);
+      setState(() {
+        _savedConnections = connections;
+        if (!_identitySelectionEdited) _selectIdentitiesForTarget();
+      });
+    }
+  }
+
+  Future<void> _loadIdentityOptions() async {
+    final keys = await KeyStorage.instance.listKeys();
+    final external = Platform.isAndroid
+        ? await OpenKeychainStorage.instance.listKeys()
+        : const <OpenKeychainKey>[];
+    if (!mounted) return;
+    setState(() {
+      _availableIdentities = availableIdentities(keys, external);
+      if (!_identitySelectionEdited) _selectIdentitiesForTarget();
+    });
+  }
+
+  void _selectIdentitiesForTarget() {
+    final fallback = _availableIdentities.length == 1
+        ? [_availableIdentities.single.id]
+        : <String>[];
+    if (_connectionType == ConnectionType.local) {
+      _selectedIdentityIds = [];
+      return;
+    }
+    try {
+      final formatted = ConnectionTarget.parse(
+        _targetController.text,
+        _connectionType,
+      ).formatted;
+      final saved = _savedConnections
+          .where(
+            (connection) =>
+                connection.connectionType == _connectionType &&
+                connection.target == formatted,
+          )
+          .firstOrNull;
+      _selectedIdentityIds = List.of(saved?.identityIds ?? fallback);
+    } on FormatException {
+      _selectedIdentityIds = fallback;
     }
   }
 
   Future<void> _openSettings() async {
-    await Navigator.of(
-      context,
-    ).push<void>(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    await Navigator.of(context)
+        .push<void>(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    await _loadIdentityOptions();
   }
 
   Future<void> _pasteTarget() async {
@@ -121,6 +170,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
         offset: _targetController.text.length,
       );
       _targetError = null;
+      _identitySelectionEdited = false;
+      _selectIdentitiesForTarget();
     });
   }
 
@@ -132,6 +183,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
     setState(() {
       _targetController.text = result.trim();
       _targetError = null;
+      _identitySelectionEdited = false;
+      _selectIdentitiesForTarget();
     });
   }
 
@@ -189,6 +242,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
     bool useDefaultRelays = true,
     List<String> customRelayUrls = const [],
   }) async {
+    final selectedIdentityIds = connectionType == ConnectionType.local
+        ? <String>[]
+        : List<String>.of(_selectedIdentityIds);
     final String username;
     final String? endpointId;
     final String? sshHost;
@@ -239,6 +295,23 @@ class _ConnectScreenState extends State<ConnectScreen> {
       final openKeychainKeys = Platform.isAndroid
           ? await OpenKeychainStorage.instance.listKeys()
           : const <OpenKeychainKey>[];
+      final available = availableIdentities(keys, openKeychainKeys);
+      if (selectedIdentityIds.any(
+        (id) => !available.any((key) => key.id == id),
+      )) {
+        throw StateError(
+          'An SSH key is missing. Choose another key for this connection.',
+        );
+      }
+      final selectedKeyNames = [
+        for (final id in selectedIdentityIds)
+          if (id.startsWith('local:')) id.substring('local:'.length),
+      ];
+      final selectedExternalKeys = [
+        for (final id in selectedIdentityIds)
+          for (final key in openKeychainKeys)
+            if (externalIdentityId(key) == id) key,
+      ];
       final globalSettings = await SettingsStorage.instance.load();
 
       final effectiveUseDefaultRelays = overrideRelays
@@ -308,8 +381,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
             endpointId: endpointId,
             username: username,
             displayName: displayName,
-            keyNames: keys.map((k) => k.name).toList(),
-            openKeychainKeys: openKeychainKeys,
+            keyNames: selectedKeyNames,
+            identityIds: selectedIdentityIds,
+            openKeychainKeys: selectedExternalKeys,
             relayUrls: relayUrls,
             extraRelayUrls: extraRelayUrls,
             host: sshHost,
@@ -327,6 +401,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
               overrideRelays: overrideRelays,
               useDefaultRelays: useDefaultRelays,
               customRelayUrls: customRelayUrls,
+              identityIds: selectedIdentityIds,
             ),
           );
           await _loadConnections();
@@ -366,6 +441,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
               overrideRelays: overrideRelays,
               useDefaultRelays: useDefaultRelays,
               customRelayUrls: customRelayUrls,
+              identityIds: selectedIdentityIds,
             ),
           );
           await _loadConnections();
@@ -382,7 +458,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
           host: host,
           port: port,
           username: username,
-          keyNames: keys.map((k) => k.name).toList(),
+          keyNames: selectedKeyNames,
           displayName: displayName,
           connectionType: connectionType,
           kind: kind,
@@ -472,6 +548,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
       _overrideRelays = conn.overrideRelays;
       _useDefaultRelays = conn.useDefaultRelays;
       _customRelayUrls = List.of(conn.customRelayUrls);
+      _selectedIdentityIds = List.of(
+        conn.identityIds ??
+            (_availableIdentities.length == 1
+                ? [_availableIdentities.single.id]
+                : <String>[]),
+      );
+      _identitySelectionEdited = true;
     });
     _connectTo(
       conn.target,
@@ -534,6 +617,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
                 _connectionType = selected.first;
                 _error = null;
                 _targetError = null;
+                _identitySelectionEdited = false;
+                _selectIdentitiesForTarget();
               });
             },
           ),
@@ -588,11 +673,93 @@ class _ConnectScreenState extends State<ConnectScreen> {
               autocorrect: false,
               enableSuggestions: false,
               onChanged: (_) {
-                if (_targetError != null) {
-                  setState(() => _targetError = null);
-                }
+                setState(() {
+                  _targetError = null;
+                  _identitySelectionEdited = false;
+                  _selectIdentitiesForTarget();
+                });
               },
               onSubmitted: (_) => _connect(),
+            ),
+          ],
+          if (_connectionType != ConnectionType.local) ...[
+            ExpansionTile(
+              title: const Text('SSH authentication'),
+              subtitle: Text(
+                _selectedIdentityIds.isEmpty
+                    ? 'Password / no SSH key'
+                    : _selectedIdentityIds
+                          .map(
+                            (id) =>
+                                _availableIdentities
+                                    .where((key) => key.id == id)
+                                    .firstOrNull
+                                    ?.label ??
+                                'Missing key',
+                          )
+                          .join(', '),
+              ),
+              tilePadding: EdgeInsets.zero,
+              children: [
+                for (
+                  var index = 0;
+                  index < _selectedIdentityIds.length;
+                  index++
+                )
+                  ListTile(
+                    dense: true,
+                    title: Text(
+                      '${index + 1}. ${_availableIdentities.where((key) => key.id == _selectedIdentityIds[index]).firstOrNull?.label ?? 'Missing key'}',
+                    ),
+                    trailing: Wrap(
+                      children: [
+                        if (index > 0)
+                          IconButton(
+                            tooltip: 'Move key up',
+                            icon: const Icon(Icons.arrow_upward),
+                            onPressed: _connecting
+                                ? null
+                                : () => setState(() {
+                                    final key = _selectedIdentityIds.removeAt(
+                                      index,
+                                    );
+                                    _selectedIdentityIds.insert(index - 1, key);
+                                    _identitySelectionEdited = true;
+                                  }),
+                          ),
+                        IconButton(
+                          tooltip: 'Remove key from connection',
+                          icon: const Icon(Icons.remove_circle_outline),
+                          onPressed: _connecting
+                              ? null
+                              : () => setState(() {
+                                  _selectedIdentityIds.removeAt(index);
+                                  _identitySelectionEdited = true;
+                                }),
+                        ),
+                      ],
+                    ),
+                  ),
+                for (final key in _availableIdentities)
+                  if (!_selectedIdentityIds.contains(key.id))
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.add),
+                      title: Text(key.label),
+                      onTap: _connecting
+                          ? null
+                          : () => setState(() {
+                              _selectedIdentityIds.add(key.id);
+                              _identitySelectionEdited = true;
+                            }),
+                    ),
+                if (_availableIdentities.isEmpty)
+                  const ListTile(
+                    title: Text(
+                      'No SSH keys saved. Password authentication is available.',
+                    ),
+                  ),
+              ],
             ),
           ],
           if (_connectionType == ConnectionType.iroh) ...[

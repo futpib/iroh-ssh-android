@@ -11,6 +11,7 @@ class SavedConnection {
   final bool overrideRelays;
   final bool useDefaultRelays;
   final List<String> customRelayUrls;
+  final List<String>? identityIds;
 
   SavedConnection({
     required this.target,
@@ -18,6 +19,7 @@ class SavedConnection {
     this.overrideRelays = false,
     this.useDefaultRelays = true,
     this.customRelayUrls = const [],
+    this.identityIds,
   });
 
   String get username {
@@ -66,6 +68,7 @@ class SavedConnection {
     'overrideRelays': overrideRelays,
     'useDefaultRelays': useDefaultRelays,
     'customRelayUrls': customRelayUrls,
+    if (identityIds != null) 'identityIds': identityIds,
   };
 
   factory SavedConnection.fromJson(Map<String, dynamic> json) {
@@ -81,6 +84,7 @@ class SavedConnection {
         useDefaultRelays: json['useDefaultRelays'] as bool? ?? true,
         customRelayUrls:
             (json['customRelayUrls'] as List?)?.cast<String>() ?? [],
+        identityIds: (json['identityIds'] as List?)?.cast<String>(),
       );
     }
     // Backwards compat: migrate old relayUrls/extraRelayUrls
@@ -93,6 +97,7 @@ class SavedConnection {
         connectionType: connectionType,
         useDefaultRelays: false,
         customRelayUrls: oldRelayUrls,
+        identityIds: (json['identityIds'] as List?)?.cast<String>(),
       );
     }
     return SavedConnection(
@@ -100,6 +105,7 @@ class SavedConnection {
       connectionType: connectionType,
       useDefaultRelays: true,
       customRelayUrls: oldExtraRelayUrls,
+      identityIds: (json['identityIds'] as List?)?.cast<String>(),
     );
   }
 

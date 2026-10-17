@@ -16,6 +16,7 @@ import 'package:iroh_ssh_app/services/fs/remote_fs.dart';
 import 'package:iroh_ssh_app/services/fs/sftp_fs.dart';
 import 'package:iroh_ssh_app/services/fs/upload_naming.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/identity_selection.dart';
 import 'package:iroh_ssh_app/services/known_hosts.dart';
 import 'package:iroh_ssh_app/widgets/host_key_dialog.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
@@ -242,7 +243,11 @@ class FileManagerTabState extends State<FileManagerTab>
   Future<void> _connectSshDirect() async {
     try {
       final keys = await KeyStorage.instance.listKeys();
-      final identities = keys.map((k) => k.keyPair).toList();
+      final identities = resolveIdentities(
+        widget.session.keyNames.map(localIdentityId).toList(),
+        keys,
+        const [],
+      );
       final socket = await SSHSocket.connect(
           widget.session.host, widget.session.port);
       final client = SSHClient(

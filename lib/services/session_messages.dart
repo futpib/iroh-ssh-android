@@ -50,6 +50,7 @@ class ConnectCommand extends ServiceCommand {
   final String username;
   final String displayName;
   final List<String> keyNames;
+  final List<String>? identityIds;
   final List<OpenKeychainKey> openKeychainKeys;
   final List<String> relayUrls;
   final List<String> extraRelayUrls;
@@ -63,6 +64,7 @@ class ConnectCommand extends ServiceCommand {
     required this.username,
     required this.displayName,
     required this.keyNames,
+    this.identityIds,
     this.openKeychainKeys = const [],
     required this.relayUrls,
     required this.extraRelayUrls,
@@ -79,6 +81,7 @@ class ConnectCommand extends ServiceCommand {
         'username': username,
         'displayName': displayName,
         'keyNames': keyNames,
+        if (identityIds != null) 'identityIds': identityIds,
         'openKeychainKeys': openKeychainKeys.map((key) => key.toJson()).toList(),
         'relayUrls': relayUrls,
         'extraRelayUrls': extraRelayUrls,
@@ -93,6 +96,7 @@ class ConnectCommand extends ServiceCommand {
         username: json['username'] as String,
         displayName: json['displayName'] as String,
         keyNames: (json['keyNames'] as List).cast<String>(),
+        identityIds: (json['identityIds'] as List?)?.cast<String>(),
         openKeychainKeys: (json['openKeychainKeys'] as List<dynamic>? ?? const [])
             .map((value) => OpenKeychainKey.fromJson(
                   (value as Map<dynamic, dynamic>).cast<String, dynamic>(),

@@ -13,6 +13,7 @@ import 'package:flutter_pty/flutter_pty.dart';
 import 'package:iroh_ssh_app/models/connection_type.dart';
 import 'package:iroh_ssh_app/models/ssh_session_info.dart';
 import 'package:iroh_ssh_app/services/key_storage.dart';
+import 'package:iroh_ssh_app/services/identity_selection.dart';
 import 'package:iroh_ssh_app/services/known_hosts.dart';
 import 'package:iroh_ssh_app/widgets/host_key_dialog.dart';
 import 'package:iroh_ssh_app/services/session_messages.dart';
@@ -477,7 +478,11 @@ class TerminalTabState extends State<TerminalTab>
           'Connecting to ${widget.session.host}:${widget.session.port}...\r\n');
 
       final keys = await KeyStorage.instance.listKeys();
-      final identities = keys.map((k) => k.keyPair).toList();
+      final identities = resolveIdentities(
+        widget.session.keyNames.map(localIdentityId).toList(),
+        keys,
+        const [],
+      );
 
       final socket = await SSHSocket.connect(
           widget.session.host, widget.session.port);

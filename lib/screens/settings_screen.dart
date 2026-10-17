@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -27,6 +28,8 @@ class _SettingsScreenState extends State<SettingsScreen>
   List<StoredKey>? _keys;
   List<OpenKeychainKey>? _openKeychainKeys;
   bool _keysLoading = true;
+  bool _importingOpenKeychain = false;
+  OpenKeychainOperation? _importOperation;
 
   bool _useDefaultRelays = true;
   List<String> _customRelayUrls = [];
@@ -50,6 +53,7 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   @override
   void dispose() {
+    unawaited(_importOperation?.cancel());
     _tabController.dispose();
     super.dispose();
   }
@@ -77,8 +81,14 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
 
   Future<void> _importOpenKeychainKey() async {
+    if (_importingOpenKeychain) return;
+    final operation = OpenKeychainOperation();
+    _importOperation = operation;
+    DialogRoute<OpenKeychainProvider>? providerRoute;
+    setState(() => _importingOpenKeychain = true);
     try {
-      final providers = await OpenKeychainClient.instance.listProviders();
+      final client = OpenKeychainClient.instance;
+      final providers = await client.listProviders(operation: operation);
       if (!mounted) return;
       if (providers.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -91,30 +101,36 @@ class _SettingsScreenState extends State<SettingsScreen>
 
       final provider = providers.length == 1
           ? providers.single
-          : await showDialog<OpenKeychainProvider>(
-              context: context,
-              builder: (ctx) => SimpleDialog(
-                title: const Text('Choose key provider'),
-                children: [
-                  for (final candidate in providers)
-                    SimpleDialogOption(
-                      onPressed: () => Navigator.pop(ctx, candidate),
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.security),
-                        title: Text(candidate.label),
-                        subtitle: Text(candidate.packageName),
-                      ),
-                    ),
-                ],
+          : await operation.run(
+              () => Navigator.of(context).push(
+                providerRoute = DialogRoute<OpenKeychainProvider>(
+                  context: context,
+                  builder: (ctx) => SimpleDialog(
+                    title: const Text('Choose key provider'),
+                    children: [
+                      for (final candidate in providers)
+                        SimpleDialogOption(
+                          onPressed: () => Navigator.pop(ctx, candidate),
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.security),
+                            title: Text(candidate.label),
+                            subtitle: Text(candidate.packageName),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             );
       if (provider == null) return;
 
-      final selection = await OpenKeychainClient.instance.selectKey(
+      final selection = await client.selectKey(
         provider.packageName,
+        operation: operation,
       );
-      final publicKey = await OpenKeychainClient.instance.getSshPublicKey(
+      final publicKey = await client.getSshPublicKey(
+        operation: operation,
         providerPackage: provider.packageName,
         keyId: selection.keyId,
       );
@@ -126,11 +142,15 @@ class _SettingsScreenState extends State<SettingsScreen>
         publicKeyString: publicKey,
       );
       key.createIdentity();
+      await operation.run(() async {});
+      if (!mounted) return;
+      operation.dispose();
+      setState(() => _importOperation = null);
       await OpenKeychainStorage.instance.save(key);
       await _loadKeys();
       if (mounted) _showOpenKeychainPublicKeyDialog(key);
     } on PlatformException catch (error) {
-      if (mounted) {
+      if (mounted && error.code != 'openkeychain_cancelled') {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(error.message ?? error.code)));
       }
@@ -139,6 +159,17 @@ class _SettingsScreenState extends State<SettingsScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not add OpenKeychain key: $error')),
         );
+      }
+    } finally {
+      operation.dispose();
+      if (providerRoute?.isActive == true) {
+        providerRoute!.navigator?.removeRoute(providerRoute!);
+      }
+      if (mounted) {
+        setState(() {
+          _importingOpenKeychain = false;
+          _importOperation = null;
+        });
       }
     }
   }
@@ -227,9 +258,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -246,9 +276,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       await _loadKeys();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -344,9 +373,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Authentication error: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Authentication error: $e')));
       }
       return;
     }
@@ -402,9 +430,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error reading key: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error reading key: $e')));
       }
     }
   }
@@ -584,12 +611,19 @@ class _SettingsScreenState extends State<SettingsScreen>
               ),
               if (Platform.isAndroid)
                 OutlinedButton.icon(
-                  onPressed: _importOpenKeychainKey,
+                  onPressed: _importingOpenKeychain
+                      ? null
+                      : _importOpenKeychainKey,
                   icon: const Icon(Icons.security),
                   label: const Text('OpenKeychain'),
                 ),
             ],
           ),
+          if (_importOperation != null)
+            TextButton(
+              onPressed: () => _importOperation?.cancel(),
+              child: const Text('Cancel key import'),
+            ),
         ],
       );
     }
@@ -611,12 +645,19 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
             if (Platform.isAndroid)
               IconButton(
-                onPressed: _importOpenKeychainKey,
+                onPressed: _importingOpenKeychain
+                    ? null
+                    : _importOpenKeychainKey,
                 icon: const Icon(Icons.security),
                 tooltip: 'Add from OpenKeychain',
               ),
           ],
         ),
+        if (_importOperation != null)
+          TextButton(
+            onPressed: () => _importOperation?.cancel(),
+            child: const Text('Cancel key import'),
+          ),
         for (final key in keys)
           Card(
             child: ListTile(
