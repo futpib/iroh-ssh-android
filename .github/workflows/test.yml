@@ -68,6 +68,12 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
+      - name: Allow emulator acceleration
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y acl
+          sudo setfacl -m "u:$(id -un):rw" /dev/kvm
+
       - name: Check shared plugin
         working-directory: packages/openkeychain_ssh
         run: |
